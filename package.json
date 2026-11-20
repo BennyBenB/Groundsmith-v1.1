@@ -1,0 +1,35 @@
+{
+  "name": "groundsmith",
+  "productName": "Groundsmith",
+  "version": "1.0.0",
+  "description": "Isometric stadium builder",
+  "author": "Groundsmith",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "fonts": "node scripts/vendor-fonts.js",
+    "dist": "npm run fonts && electron-builder --publish never",
+    "dist:win": "npm run fonts && electron-builder --win --publish never",
+    "dist:mac": "npm run fonts && electron-builder --mac --publish never",
+    "dist:linux": "npm run fonts && electron-builder --linux --publish never",
+    "dist:dir": "npm run fonts && electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.groundsmith.game",
+    "productName": "Groundsmith",
+    "artifactName": "Groundsmith-${version}-${os}-${arch}.${ext}",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "app/**/*", "build/icon.png", "package.json"],
+    "compression": "maximum",
+    "win": { "target": ["portable", "zip"], "icon": "build/icon.png" },
+    "portable": { "artifactName": "Groundsmith-${version}-portable.exe" },
+    "mac": { "target": ["dmg", "zip"], "icon": "build/icon.png", "category": "public.app-category.games" },
+    "linux": { "target": ["AppImage", "tar.gz"], "icon": "build/icon.png", "category": "Game" }
+  }
+}
