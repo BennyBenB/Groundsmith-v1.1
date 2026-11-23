@@ -787,6 +787,8 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
   <div class="pane" data-pane="tiles" hidden>
     <h4 class="qh">Ground size</h4>
     <div class="row gsz"><div class="seg" id="envGridSeg"></div></div>
+    <h4 class="qh">Pitch size</h4>
+    <div class="row"><div class="seg" id="envPitchSeg" style="flex-wrap:wrap"></div></div>
     <div class="info">Each step adds or removes two tiles along every side. Bigger grounds leave more room for a surround.</div>
   </div>
   <div class="pane" data-pane="decor" hidden>
@@ -916,6 +918,7 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
     <div id="brOpts" hidden><div class="row"><span class="lab">Relief</span><div class="seg" id="brDepSeg"></div></div><div class="row"><span class="lab">Windows</span><div class="seg" id="brWinSeg"></div></div><div class="row"><span class="lab">Roofline</span><div class="seg" id="brGabSeg"></div></div><div class="row"><span class="lab">Ground storey</span><div class="seg" id="brGfSeg"></div></div></div>
     <div class="row" id="gfRow"><span class="lab">Ground floor</span><div class="seg ind" id="gfSeg"></div></div>
     <div class="row" id="outRow"><span class="lab">Outer</span><div class="seg" id="outSeg"></div></div>
+    <div class="row" id="entStyRow" hidden><span class="lab">Entrance style</span><div class="seg" id="entStySeg" style="flex-wrap:wrap"></div></div>
     <div class="steps" id="entSteps" hidden><div class="step"><span class="lab">Entrance width</span><div class="ctl"><button class="btn sm" data-p="ew" data-d="-1" aria-label="Narrower">&minus;</button><output id="o-ew">0</output><button class="btn sm" data-p="ew" data-d="1" aria-label="Wider">+</button></div></div><div class="step"><span class="lab">Entrance depth</span><div class="ctl"><button class="btn sm" data-p="ed" data-d="-1" aria-label="Shallower">&minus;</button><output id="o-ed">0</output><button class="btn sm" data-p="ed" data-d="1" aria-label="Deeper">+</button></div></div></div>
     <div class="steps" id="outSteps"><div class="step"><span class="lab">Outer width</span><div class="ctl"><button class="btn sm" data-p="ow" data-d="-1" aria-label="Narrower">&minus;</button><output id="o-ow">0</output><button class="btn sm" data-p="ow" data-d="1" aria-label="Wider">+</button></div></div><div class="step"><span class="lab">Outer depth</span><div class="ctl"><button class="btn sm" data-p="od" data-d="-1" aria-label="Shallower">&minus;</button><output id="o-od">0</output><button class="btn sm" data-p="od" data-d="1" aria-label="Deeper">+</button></div></div></div>
     <div class="row" id="archRow"><span class="lab">Facade detail</span><div class="seg ind" id="archSeg"></div></div>
@@ -1066,6 +1069,9 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
       <label>Team<input id="fTeam" maxlength="40" autocomplete="off" placeholder="e.g. Riverside Rovers"></label>
       <label>Town or city<input id="fTown" maxlength="40" autocomplete="off" placeholder="e.g. Northampton"></label>
     </div>
+    <h2>Camera angle</h2>
+    <p>Standard is the classic isometric view. Lower tilts the camera towards pitch level, so the stands stand taller and the ground looks flatter.</p>
+    <div class="row"><div class="seg" id="camSeg"></div></div>
     <h2>Breakdown</h2>
     <div class="bd" id="bd"></div>
     <h2>My stadiums</h2>
@@ -1110,8 +1116,8 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
 <script>
 'use strict';
 /* ---------- constants ---------- */
-let N = 30, PX = 11, PY = 9; const PW = 8, PL = 12, NSEC = 6;   // grid, pitch origin and size (cells), sections per stand
-const TW = 64, TH = 32, BH = 26;                            // tile width, tile height, pixels per level of height
+let N = 30, PX = 11, PY = 9, PW = 8, PL = 12; const NSEC = 6;   // grid, pitch origin and size (cells), sections per stand
+let TW = 64, TH = 32, BH = 26;                            // tile width, tile height, pixels per level of height
 
 /* ---------- colour ---------- */
 function parse(h) { if (h.charAt(0) === 'r') { const m = h.match(/[\d.]+/g); return [+m[0], +m[1], +m[2]]; } h = h.replace('#', ''); const n = parseInt(h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
@@ -1196,17 +1202,18 @@ function drawPerson(ctx, x, y, pp) {   // a tiny upright spectator: head, hair, 
 const BRICKPAL = {};
 function brickFace(ctx, P, b, side) {
   const col = side ? b.f.right : b.f.left, w = side ? b.y1 - b.y0 : b.x1 - b.x0, H = b.z1 - b.z0;
-  if (w < 0.14 || H < 0.18) return;
+  if (w < 0.06 || H < 0.08) return;
   const pal = BRICKPAL[col] || (BRICKPAL[col] = [0.86, 0.94, 1, 1.07, 1.15, 0.78].map(function (k) { return mix(col, k); }));
   const CH = 0.0769, nb = Math.max(2, Math.round(w / 0.15)), BW = w / nb, seed = Math.round(b.x0 * 977 + b.y0 * 613 + b.z0 * 311) | 0;
   const pt = side ? function (u, z) { return P(b.x1, b.y0 + u, z); } : function (u, z) { return P(b.x0 + u, b.y1, z); };
   ctx.lineWidth = 1; ctx.lineJoin = 'miter';
-  const nc = Math.ceil(H / CH - 1e-6);
+  const cb0 = Math.floor(b.z0 / CH + 1e-6), nc = Math.ceil(b.z1 / CH - 1e-6) - cb0, BWg = 0.15, wo = side ? b.y0 : b.x0, gi0 = Math.floor(wo / BWg) - 1;   // courses and joints sit on one world grid, so neighbouring brick boxes line up
   for (let c = 0; c < nc; c++) {
-    const za = b.z0 + c * CH, zb = Math.min(b.z1, za + CH), off = (c % 2) * 0.5;
-    for (let i = -1; i < nb; i++) {
-      const u0 = Math.max(0, (i + off) * BW), u1 = Math.min(w, (i + 1 + off) * BW); if (u1 - u0 < 0.01) continue;
-      let hh = Math.imul(c * 73856093 ^ (i + 5) * 19349663 ^ seed * 83492791, 2246822519); hh ^= hh >>> 15; const r = (hh >>> 0) % 6;
+    const cg = cb0 + c, za = Math.max(b.z0, cg * CH), zb = Math.min(b.z1, (cg + 1) * CH), off = (cg % 2) * 0.5; if (zb - za < 0.004) continue;
+    for (let gi = gi0; (gi + off) * BWg < wo + w; gi++) {
+      const u0 = Math.max(0, (gi + off) * BWg - wo), u1 = Math.min(w, (gi + 1 + off) * BWg - wo); if (u1 - u0 < 0.01) continue;
+      const i = gi;
+      let hh = Math.imul(cg * 73856093 ^ (i + 5) * 19349663 ^ (side + 1) * 83492791, 2246822519); hh ^= hh >>> 15; const r = (hh >>> 0) % 6;
       const A = pt(u0, zb), B = pt(u1, zb), C = pt(u1, za), D = pt(u0, za);
       ctx.fillStyle = pal[r]; ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.lineTo(C[0], C[1]); ctx.lineTo(D[0], D[1]); ctx.closePath(); ctx.fill();
       ctx.strokeStyle = 'rgba(226,212,192,0.2)'; ctx.stroke();
@@ -1398,8 +1405,11 @@ function worldBox(ctx, a, v) {
   drawBoxP(ctx, b, function (x, y, z) { return [(x - y) * TW / 2, (x + y) * TH / 2 - z * BH]; });
 }
 /* ---------- pitch: a painted grass texture (mown stripes, grain, worn patches, pitch markings) ---------- */
-const PM = 0.12, PMG = 1, PTX = { x0: PX - PMG, y0: PY - PMG, w: PW + 2 * PMG, h: PL + 2 * PMG, ppu: 40, cv: null, cvs: {} };
+const PM = 0.12, PMG = 1, PTX = { x0: PX - PMG, y0: PY - PMG, get w() { return PW + 2 * PMG; }, get h() { return PL + 2 * PMG; }, ppu: 40, cv: null, cvs: {} };
 /* the grid can be enlarged (30..60, even); the pitch stays centred in it */
+function setPitch(w, l) { w = Math.max(8, Math.min(16, Math.round(+w / 2) * 2 || 8)); l = Math.max(12, Math.min(24, Math.round(+l / 2) * 2 || 12)); if (w !== PW || l !== PL) { PW = w; PL = l; PTX.cv = null; PTX.cvs = {}; } return [PW, PL]; }
+function setCamera(id) { const c = CAMS.filter(function (x) { return x[0] === id; })[0] || CAMS[0]; if (TH !== c[2] || BH !== c[3]) { TH = c[2]; BH = c[3]; spriteCache.clear(); spriteBytes = 0; PTX.cv = null; PTX.cvs = {}; } }   // a lower camera flattens the ground and stretches height; every cached sprite is drawn for the old angle
+function setGround(m) { setCamera(m.cam); setPitch(m.pitW || 8, m.pitL || 12); setGrid(m.n); }
 function setGrid(n) { n = Math.max(30, Math.min(60, Math.round(+n / 2) * 2 || 30)); N = n; PX = (n - PW) / 2; PY = (n - PL) / 2; PTX.x0 = PX - PMG; PTX.y0 = PY - PMG; return n; }
 function pitchTexture(track, lawn, lw, pt, ez, perim) {
   const PR = perim && /^#[0-9a-f]{6}$/i.test(perim) ? [parseInt(perim.substr(1, 2), 16), parseInt(perim.substr(3, 2), 16), parseInt(perim.substr(5, 2), 16)] : null;
@@ -2018,9 +2028,13 @@ function edgeY(sh, s) {   // the panel's front edge in side view: its height (1 
 const ROOFS0 = [['none', 'None'], ['flat', 'Flat'], ['slope', 'Sloped'], ['rise', 'Upswept'], ['rise2', 'Upswept v2'], ['cantilever', 'Cantilever'], ['posted', 'Posted'], ['barrel', 'Barrel'], ['truss', 'Lattice'], ['glass', 'Glass']];
 const ROOFS = ROOFS0.concat([['clean', 'Clean glazed'], ['halo', 'Pale halo'], ['mesh', 'Mesh slab'], ['zigzag', 'Truss-top'], ['gable', 'Gable'], ['saw', 'Sawtooth'], ['lean', 'Lean-to'], ['bays', 'Gabled bays'], ['shed', 'Corrugated shed'], ['lip', 'Concrete lip'], ['ribs', 'Arched ribs'], ['fold', 'Folded plate'], ['kop', 'Terrace cover'], ['butterfly', 'Butterfly'], ['cwt', 'Counterweight'], ['hypar', 'Concrete shells'], ['glut', 'Glass + lattice'], ['wedge', 'Concrete wedge']]);
 const SIGNS = [['none', 'None'], ['ground', 'Ground name'], ['team', 'Team']];
-const BRDEPS = [['flat', 'Flat'], ['low', 'Shallow'], ['deep', 'Deep']], BRWINS = [['sash', 'Square'], ['arch', 'Arched'], ['segment', 'Segmental'], ['pair', 'Wide pair']], BRGABS = [['none', 'None'], ['gables', 'Dutch gables'], ['pavilion', 'Pavilions']], BRGFS = [['win', 'Windows'], ['door', 'Entrances'], ['turn', 'Turnstiles'], ['mix', 'Mixed']];
+const BRDEPS = [['flat', 'Flat'], ['low', 'Shallow'], ['deep', 'Deep']], BRWINS = [['sash', 'Square'], ['arch', 'Arched'], ['segment', 'Segmental'], ['pair', 'Wide pair']], BRGABS = [['none', 'None'], ['gables', 'Dutch gables'], ['pavilion', 'Pavilions']], CNWINS = [['strip', 'Ribbon'], ['punch', 'Punched'], ['slot', 'Slots'], ['panel', 'Panels']], TWGABS = [['none', 'Plain turrets'], ['pediment', 'Pediments'], ['dome', 'Domed turrets']], CNGABS = [['none', 'None'], ['towers', 'Stair towers'], ['cantilever', 'Cantilever']], GLWINS = [['curtain', 'Curtain wall'], ['ribbon', 'Ribbon'], ['louvre', 'Louvres']], GLGABS = [['none', 'None'], ['canopy', 'Canopy'], ['atrium', 'Atria']], BRGFS = [['win', 'Windows'], ['door', 'Entrances'], ['turn', 'Turnstiles'], ['mix', 'Mixed']];
 const ARCHS = [['none', 'Plain'], ['blocks', 'Blocks'], ['doors', 'Entrances'], ['mixed', 'Both']];
-const FACADES = [['none', 'Open'], ['brick', 'Brick'], ['towers', 'Towers'], ['ribbed', 'Ribbed'], ['banded', 'Banded'], ['concrete', 'Concrete'], ['glass', 'Glass'], ['glazed', 'Fully glazed'], ['steel', 'Steel'], ['arcade', 'Arcade'], ['colonnade', 'Colonnade'], ['deco', 'Art deco'], ['modern', 'Modern'], ['louvre', 'Louvres'], ['openbrick', 'Open frame & brick'], ['club', 'Club colours'], ['cladding', 'Cladding'], ['fins', 'Fins'], ['tudor', 'Tudor'], ['ribbon', 'Ribbon'], ['frame', 'Frame & brick'], ['timberglass', 'Timber & glass bands'], ['precast', 'Precast panels'], ['buttress', 'Raking piers']];
+const FACADES = [['none', 'Open'], ['brick', 'Brick'], ['towers', 'Towers'], ['ribbed', 'Ribbed'], ['banded', 'Banded'], ['concrete', 'Concrete'], ['glass', 'Glass'], ['glazed', 'Fully glazed'], ['steel', 'Steel'], ['arcade', 'Arcade'], ['colonnade', 'Colonnade'], ['deco', 'Art deco'], ['louvre', 'Louvres'], ['openbrick', 'Open frame & brick'], ['club', 'Club colours'], ['cladding', 'Cladding'], ['fins', 'Fins'], ['ribbon', 'Ribbon'], ['frame', 'Frame & brick'], ['timberglass', 'Timber & glass bands'], ['precast', 'Precast panels'], ['buttress', 'Raking piers'], ['etfe', 'Cushion skin'], ['greenwall', 'Living wall'], ['timber', 'Timber boards'], ['gabion', 'Gabion stone'], ['mill', 'Victorian mill'], ['perf', 'Perforated screen'], ['mosaic', 'Tile mosaic'], ['brickpier', 'Brick piers']];
+const FACMOVED = { modern: 'cladding', tudor: 'timber' };   // styles that were removed: saved stadiums that used them move to the nearest remaining one
+const CAMS = [['std', 'Standard', 32, 26], ['low', 'Low', 24, 30], ['vlow', 'Very low', 18, 34]];
+const PITSZ = [[8, 12, 'Small 8 \u00d7 12'], [10, 16, 'Standard 10 \u00d7 16'], [12, 20, 'Large 12 \u00d7 20']];
+const ENTSTY = [['glass', 'Stone & glass'], ['glazedbox', 'Glazed box'], ['brickpier', 'Brick piers'], ['brickgable', 'Brick gable'], ['concportal', 'Concrete portal'], ['conccanopy', 'Concrete canopy'], ['glassatrium', 'Glass atrium']];
 const OUTERS = [['none', 'Plain'], ['buttress', 'Buttresses'], ['stairs', 'Stairs'], ['towers', 'Towers'], ['mixed', 'Mixed']];
 const GFLOORS = [['none', 'Plain'], ['turn', 'Turnstiles'], ['shop', 'Shop front'], ['glass', 'Glazed']];
 const PATTERNS = [['plain', 'Plain'], ['stripe', 'Stripes'], ['check', 'Checks'], ['text', 'Text']];
@@ -2036,7 +2050,7 @@ const STANDS = [['N', 'North end'], ['E', 'East side'], ['S', 'South end'], ['W'
 const isCorner = function (k) { return k.length === 2; };
 const LIM = { tiers: [0, 3], depth: [1, 12], height: [1, 8], ow: [-10, 10], od: [-10, 10], ew: [-10, 10], ed: [-10, 10], ecl: [-10, 10], fpo: [0, 10], plof: [-10, 10], segx: [-10, 10] };
 function defStand(o, nsec) {
-  const s = Object.assign({ on: true, stext: '', stpos: 50, bkx: 0, stp: 0, ucol: 'auto', ccol: 'auto', rfc: 'auto', cex: 'auto', cey: 'auto', cshape: 'round', plate: 'off', plof: 0, rtxt: '', rtcol: 'white', seg: 'off', segx: 0, segc: 'white', tiers: 1, depth: 3, height: 1, roof: 'none', facade: 'none', col: 'red', rcol: 'white', acol: 'yellow', pattern: 'plain', seating: 'seats', tcol: 'auto', tbar: 'auto', ads: true, uc: false, ext: 0, endcap: 'none', ecl: 0, ecs: 'flat', rdis: '', tdis: '', fdis: '', fpo: 0, rlen: 'short', rlights: 'none', crowd: 'none', gfloor: 'none', outer: 'none', ow: 0, od: 0, ob: false, os: false, ot: false, oe: false, oc: false, of: false, ew: 0, ed: 0, sign: 'none', fcol: 'auto', wcol: 'auto', scol: 'auto', gantry: false, feat: 'none', fl: true, osz: '3x3', oturn: false, bsz: 'large', bz: 'mid', posts: true, arch: 'mixed', fdep: 'low', fwin: 'sash', fgab: 'none', fgf: 'mix', flx: 0, fly: 0 }, o || {});
+  const s = Object.assign({ on: true, stext: '', stpos: 50, bkx: 0, stp: 0, ucol: 'auto', ccol: 'auto', rfc: 'auto', cex: 'auto', cey: 'auto', cshape: 'round', plate: 'off', plof: 0, rtxt: '', rtcol: 'white', seg: 'off', segx: 0, segc: 'white', tiers: 1, depth: 3, height: 1, roof: 'none', facade: 'none', col: 'red', rcol: 'white', acol: 'yellow', pattern: 'plain', seating: 'seats', tcol: 'auto', tbar: 'auto', ads: true, uc: false, ext: 0, endcap: 'none', ecl: 0, ecs: 'flat', rdis: '', tdis: '', fdis: '', fpo: 0, rlen: 'short', rlights: 'none', crowd: 'none', gfloor: 'none', outer: 'none', ow: 0, od: 0, ob: false, os: false, ot: false, oe: false, oc: false, of: false, ew: 0, ed: 0, sign: 'none', fcol: 'auto', wcol: 'auto', scol: 'auto', gantry: false, feat: 'none', fl: true, osz: '3x3', oturn: false, bsz: 'large', bz: 'mid', posts: true, arch: 'none', fdep: 'low', fwin: 'sash', fgab: 'none', fgf: 'mix', flx: 0, fly: 0 }, o || {});
   s.secs = []; for (let i = 0; i < nsec; i++) s.secs.push({ f: 'seats', c: null });
   return s;
 }
@@ -2055,7 +2069,7 @@ function migrateModel(m) { ALL_KEYS.forEach(function (k) { const x = migrateTDH(
 function newModel() {
   const st = {};
   ALL_KEYS.forEach(function (k) { st[k] = defStand(isCorner(k) ? { ads: false } : {}, isCorner(k) ? 1 : NSEC); });
-  return { sv: 4, pw: 2, shellrl: 50, st: st, lights: true, adcol: 'white', track: false, pitch: 'football', furn: true, players: false, matchday: false, flagcol: 'red', adart: 'brands', allSeats: false, perim: 'none', ezc: 'blue', ezt: 'white', ezn: true, lstyle: 'lattice', shell: 'none', shellhv: 40, shellk: 'timber', shellsk: 'slats', shellrf: 'solid', shellp: false, shellcol: false, shellcrest: null, shellcrestc: 'auto', shellg: false, shellr: false, shelle: false, shellw: false, shellsl: false, shellgt: false, shellc: 'auto', shells: 'auto', lawn: 'h', lawnw: 'med', shade: 'soft', tod: 'day', sun: 'SW', env: { auto: 'concourse', cells: {} }, cb: {}, n: 30, name: '', team: '', town: '' };
+  return { sv: 4, cam: 'std', n: 40, pitW: 10, pitL: 16, pw: 2, shellrl: 50, st: st, lights: true, adcol: 'white', track: false, pitch: 'football', furn: true, players: false, matchday: false, flagcol: 'red', adart: 'brands', allSeats: false, perim: 'none', ezc: 'blue', ezt: 'white', ezn: true, lstyle: 'lattice', shell: 'none', shellhv: 40, shellk: 'timber', shellsk: 'slats', shellrf: 'solid', shellp: false, shellcol: false, shellcrest: null, shellcrestc: 'auto', shellg: false, shellr: false, shelle: false, shellw: false, shellsl: false, shellgt: false, shellc: 'auto', shells: 'auto', lawn: 'h', lawnw: 'med', shade: 'soft', tod: 'day', sun: 'SW', env: { auto: 'concourse', cells: {} }, cb: {}, name: '', team: '', town: '' };
 }
 function setK(m, keys, o) { keys.forEach(function (k) { Object.assign(m.st[k], o); }); }
 function preset(name) {
@@ -2806,13 +2820,13 @@ function outerR(o, a, b, d0, d1) {   // lateral a..b, depth d0..d1 measured outw
 }
 function wallBase(p, seat) {
   if (p.wcol !== 'auto') return CBY[p.wcol];
-  return p.facade === 'cladding' ? seat : p.facade === 'fins' ? '#d8352e' : p.facade === 'ribbon' ? '#b9bcc0' : p.facade === 'tudor' ? '#ebe8de' : wallCol(p.facade);
+  return p.facade === 'cladding' ? seat : p.facade === 'fins' ? '#d8352e' : p.facade === 'ribbon' ? '#b9bcc0' : wallCol(p.facade);
 }
 /* a curved-corner facade built from sub-cell strips: bays of glazing between pilasters, with a plinth, sill, string course and cornice,
    so the arc reads as a smooth wall instead of a comb of tiny windows. `a` is the angular index of the strip. */
 function cornerFacade(p, r, hF, a, seat) {
   const out = [], st = p.facade, wc = wallBase(p, seat), fcol = p.fcol !== 'auto' ? CBY[p.fcol] : null;
-  const glassy = st === 'glass' || st === 'modern' || st === 'steel';
+  const glassy = st === 'glass' || st === 'steel';
   const trim = fcol || (st === 'club' ? '#f2f2ee' : mix(wc, 1.25)), GL = glassy ? '#6a93b0' : '#46606f', FR = '#262b30';
   const bay = ((a % 4) + 4) % 4, pil = bay === 0, mull = false;
   const add = function (z0, z1, c) { if (z1 > z0) out.push(bx(r[0], r[1], r[2], r[3], z0, z1, c)); };
@@ -2885,9 +2899,69 @@ function annexBoxes(p, o, i, si, per, len, hF, seat, key, zcap) {
   let blk = null;
   if (ENTR) {
     const W = Math.max(1.2, 3 + (p.ew | 0) * 0.28), bd = 0.62 + (p.ed | 0) * 0.034, uc = len / 2, u0 = uc - W / 2, u1 = uc + W / 2, a0 = Math.max(0, u0 - i), a1 = Math.min(1, u1 - i);
-    if (a1 - a0 > 0.01) blk = { a0: a0, a1: a1, bd: bd, l: u0 > i, r: u1 < i + 1 };
+    if (a1 - a0 > 0.01) blk = { a0: a0, a1: a1, bd: bd, l: u0 > i, r: u1 < i + 1, lc: uc - i, u0l: u0 - i, u1l: u1 - i, W: W };
   }
-  if (blk) {
+  const entBlk = function (sty, k) {   // the five other entrance blocks: brick arch, brick gatehouse, concrete portal, concrete canopy and glass atrium
+    const hb = Math.min(hF + 0.22, zcap - 0.02), bd = k.bd, a0 = k.a0, a1 = k.a1, c = k.lc, hg = Math.max(0.9, hb * 0.5), BRC = '#a1503a', STN = '#dccfb4', DKI = '#16222b', STEEL = '#cfd5da', CON = '#b9bab4', CND = '#8f9190', GLB = ['rgba(150,200,226,0.5)', 'rgba(112,166,196,0.56)', 'rgba(80,134,164,0.62)'];
+    const R = function (x0, x1, f0, f1, z0, z1, col, soft, brick) { x0 = Math.max(x0, a0); x1 = Math.min(x1, a1); if (x1 - x0 < 0.004) return; const n0 = out.length; B(x0, x1, f0, f1, z0, z1, col, soft); if (brick && out.length > n0) out[out.length - 1][12] = 'b'; };
+    const stepsF = function (hw) { R(c - hw - 0.15, c + hw + 0.15, 0, bd + 0.22, 0, 0.05, '#9a9a96', 1); R(c - hw - 0.08, c + hw + 0.08, 0, bd + 0.12, 0.05, 0.1, '#aaaaa5', 1); };
+    const leafs = function (hw, zt, f, col) { R(c - hw + 0.04, c - 0.01, f, f + 0.03, 0.08, zt, col); R(c + 0.01, c + hw - 0.04, f, f + 0.03, 0.08, zt, col); R(c - hw + 0.08, c - 0.05, f + 0.03, f + 0.05, zt * 0.45, zt - 0.1, '#a9bcc6'); R(c + 0.05, c + hw - 0.08, f + 0.03, f + 0.05, zt * 0.45, zt - 0.1, '#a9bcc6'); };
+    if (sty === 'glazedbox') {   // a minimal, fully glazed box: glass from floor to roof, hairline mullions, a razor-thin roof edge; the crest panel is glass-toned so nothing solid shows
+      const x0 = k.u0l, x1 = k.u1l, ZT = hb - 0.04;
+      R(a0, a1, 0, bd + 0.12, 0, 0.04, '#9a9a96', 1); R(a0, a1, 0.02, bd - 0.06, 0.04, ZT, '#3d6074', 1); R(a0, a1, bd - 0.09, bd - 0.06, 0.04, ZT, GLB);
+      for (let m = 0; m * 0.6 + x0 < x1 + 0.001; m++) R(x0 + m * 0.6, x0 + m * 0.6 + 0.012, bd - 0.1, bd - 0.04, 0.04, ZT, '#dfe4e7', 1);
+      R(c - 0.07, c + 0.07, bd - 0.1, bd - 0.05, 0.04, 1.1, '#0d151b'); R(c - 0.8, c + 0.8, bd - 0.1, bd, hg + 0.1, hb - 0.12, '#6f9db3', 1);
+      R(a0, a1, bd - 0.1, bd - 0.04, hb - 0.12, hb - 0.1, '#dfe4e7', 1);
+      R(a0, a1, 0, bd - 0.02, ZT, hb, '#5a636b', 1);
+      if (k.l) R(a0, a0 + 0.015, bd - 0.1, bd - 0.04, 0.04, ZT, '#dfe4e7', 1); if (k.r) R(a1 - 0.015, a1, bd - 0.1, bd - 0.04, 0.04, ZT, '#dfe4e7', 1);
+    } else if (sty === 'brickpier') {   // brick piers and glass: tall slim brick piers with floor-to-fascia glazing between, a deep brick fascia and stone coping
+      const W = k.W, n = Math.max(3, 2 * Math.floor(W / 2.4) + 1), x0 = k.u0l, pw = 0.2, zf = hb - 0.45;
+      R(a0, a1, 0, bd - 0.05, 0, 0.1, mix(BRC, 0.6), 1, 1);
+      for (let m = 0; m < n; m++) { const xa = x0 + m * (W - pw) / n + pw, xb = x0 + (m + 1) * (W - pw) / n; R(xa, xb, 0.02, bd - 0.16, 0.1, zf, '#3d6074', 1); R(xa, xb, bd - 0.19, bd - 0.16, 0.1, zf, GLB); }
+      for (let m = 0; m <= n; m++) { const x = x0 + m * (W - pw) / n; R(x, x + pw, 0, bd - 0.05, 0, zf, BRC, 1, 1); }
+      R(a0, a1, 0, bd, zf, hb, BRC, 1, 1); R(a0, a1, 0, bd + 0.02, zf - 0.05, zf, STN, 1); R(a0, a1, 0, bd + 0.025, hb - 0.06, hb, STN, 1);
+      R(c - 0.07, c + 0.07, bd - 0.2, bd - 0.14, 0.1, 1.1, '#0d151b'); stepsF(0.45);
+      R(c - 0.8, c + 0.8, bd - 0.16, bd, hg + 0.1, zf, BRC, 1, 1);
+    } else if (sty === 'brickgable') {   // a stepped-gable brick block: a Dutch-style stepped parapet, tall glazed entrance with a stone surround, slim sash windows either side
+      const ow = 0.55, zt = Math.min(1.25, hg + 0.25);
+      R(a0, a1, 0, bd, 0, 0.1, mix(BRC, 0.6), 1, 1); R(a0, c - ow - 0.1, 0, bd, 0.1, hb, BRC, 1, 1); R(c + ow + 0.1, a1, 0, bd, 0.1, hb, BRC, 1, 1); R(c - ow - 0.1, c + ow + 0.1, 0, bd, zt, hb, BRC, 1, 1);
+      R(c - ow, c + ow, 0.02, bd - 0.25, 0.1, zt, DKI, 1); R(c - ow, c + ow, bd - 0.28, bd - 0.25, 0.1, zt - 0.05, GLB); leafs(ow, zt - 0.05, bd - 0.3, '#2c3a44'); stepsF(ow);
+      R(c - ow - 0.1, c - ow, bd - 0.1, bd + 0.03, 0.1, zt, STN, 1); R(c + ow, c + ow + 0.1, bd - 0.1, bd + 0.03, 0.1, zt, STN, 1); R(c - ow - 0.1, c + ow + 0.1, bd - 0.1, bd + 0.03, zt, zt + 0.08, STN, 1);
+      for (let q = 0; q < 4; q++) { const hw = 1.2 - q * 0.33, z0 = hb + q * 0.2; R(c - hw, c + hw, 0.05, bd, z0, z0 + 0.2, BRC, 1, 1); R(c - hw - 0.03, c + hw + 0.03, 0.04, bd + 0.025, z0 + 0.16, z0 + 0.2, STN, 1); }
+      R(a0, a1, 0, bd + 0.025, hb - 0.06, hb, STN, 1); R(c - 0.45, c + 0.45, bd - 0.1, bd + 0.006, hg + 0.2, hb - 0.2, STN, 1);
+      [-1.2, -0.95, 0.95, 1.2].forEach(function (dx) { if (Math.abs(dx) < k.W / 2 - 0.15) [[0.4, hg - 0.1], [hg + 0.2, hb - 0.25]].forEach(function (zz) { if (zz[1] > zz[0] + 0.2) { R(c + dx - 0.07, c + dx + 0.07, bd, bd + 0.012, zz[0], zz[1], DKI, 1); R(c + dx - 0.1, c + dx + 0.1, bd, bd + 0.03, zz[0] - 0.04, zz[0], STN, 1); } }); });
+    } else if (sty === 'concportal') {   // a brutalist concrete portal: board-marked mass, a deep cantilevered beam over a tall glazed opening, flanking fins
+      const ow = 0.9, zt = hg - 0.1;
+      R(a0, a1, 0, 0.06 + bd - 0.1, 0, 0.1, CND, 1); R(a0, c - ow, 0, bd - 0.1, 0.1, hb, CON, 1); R(c + ow, a1, 0, bd - 0.1, 0.1, hb, CON, 1); R(c - ow, c + ow, 0, bd - 0.1, zt, hb, CON, 1);
+      for (let z = 0.3; z < hb - 0.15; z += 0.25) R(a0, a1, bd - 0.1, bd - 0.088, z, z + 0.012, CND, 1);
+      R(c - ow, c + ow, 0.02, bd - 0.25, 0.1, zt, DKI, 1); R(c - ow + 0.03, c + ow - 0.03, bd - 0.3, bd - 0.26, 0.1, zt - 0.04, GLB); for (let m = 0; m < 8; m++) R(c - ow + 0.03 + m * (2 * ow - 0.06) / 7, c - ow + 0.05 + m * (2 * ow - 0.06) / 7, bd - 0.3, bd - 0.22, 0.1, zt - 0.04, STEEL);
+      R(c - 0.07, c + 0.07, bd - 0.31, bd - 0.2, 0.1, zt - 0.04, '#0d151b');
+      R(c - ow - 0.35, c + ow + 0.35, 0, bd + 0.45, zt, zt + 0.16, CND, 1); R(c - ow - 0.3, c + ow + 0.3, 0.02, bd + 0.4, zt - 0.012, zt, '#ffe7b0');
+      [-1, 1].forEach(function (sg) { for (let q = 0; q < 2; q++) { const fx = c + sg * (ow + 0.45 + q * 0.3); R(fx - 0.06, fx + 0.06, 0, bd + 0.2 - q * 0.08, 0.1, hb - 0.12, q ? CON : mix(CON, 1.08), 1); } });
+      R(c - ow - 0.8, c + ow + 0.8, bd - 0.1, bd + 0.02, zt + 0.16, hb - 0.12, mix(CON, 1.1), 1);
+      R(a0, a1, 0, bd + 0.1, hb - 0.12, hb, CND, 1); stepsF(ow);
+    } else if (sty === 'conccanopy') {   // a concrete pavilion: slim columns under a deep flat roof slab with a lit soffit, glazing behind, a plain fascia above
+      const x0 = k.u0l, x1 = k.u1l, nc = Math.max(3, Math.round(k.W * 1.1));
+      R(a0, a1, 0.02, bd - 0.6, 0.06, hg, DKI, 1); R(a0, a1, bd - 0.63, bd - 0.6, 0.06, hg, GLB);
+      for (let m = 0; m * 0.25 + x0 < x1 + 0.001; m++) R(x0 + m * 0.25, x0 + m * 0.25 + 0.018, bd - 0.63, bd - 0.57, 0.06, hg, STEEL);
+      R(c - 0.5, c + 0.5, bd - 0.64, bd - 0.58, 0.06, hg - 0.1, '#0d151b');
+      for (let m = 0; m <= nc; m++) { const cx = x0 + 0.1 + m * (x1 - x0 - 0.2) / nc; R(cx - 0.07, cx + 0.07, bd - 0.38, bd - 0.2, 0.0, hg, CON, 1); }
+      R(a0, a1, 0, bd + 0.55, hg, hg + 0.14, CON, 1); R(a0, a1, 0.02, bd + 0.5, hg - 0.012, hg, '#ffe7b0');
+      R(a0, a1, 0, bd, hg + 0.14, hb - 0.12, mix(CON, 1.1), 1); R(a0, a1, 0, bd + 0.08, hb - 0.12, hb, CND, 1); R(a0, a1, 0, bd + 0.2, 0, 0.04, '#9a9a96', 1);
+    } else if (sty === 'glassatrium') {   // a full-height steel and glass atrium: fine mullions, transoms, a solid steel panel for the crest, a glazed lantern on the roof
+      const x0 = k.u0l, x1 = k.u1l;
+      R(a0, a1, 0, 0.5, 0, 0.12, '#8f9190', 1); R(a0, a1, 0.02, bd - 0.08, 0.1, hb - 0.12, DKI, 1); R(a0, a1, bd - 0.1, bd - 0.07, 0.12, hb - 0.12, GLB);
+      for (let m = 0; m * 0.25 + x0 < x1 + 0.001; m++) R(x0 + m * 0.25, x0 + m * 0.25 + 0.02, bd - 0.1, bd - 0.03, 0.12, hb - 0.12, STEEL);
+      for (let z = 0.62; z < hb - 0.15; z += 0.5) R(a0, a1, bd - 0.1, bd - 0.03, z, z + 0.02, STEEL);
+      R(c - 0.12, c + 0.12, bd - 0.11, bd - 0.07, 0.12, 1.15, '#0d151b'); R(c - 0.14, c + 0.14, bd - 0.14, bd, 1.17, 1.22, STEEL);
+      R(c - 0.8, c + 0.8, bd - 0.1, bd, hg + 0.1, hb - 0.12, '#3b444c', 1); R(c - 0.84, c + 0.84, bd - 0.1, bd + 0.03, hg + 0.04, hg + 0.1, STEEL, 1);
+      R(a0, a1, 0, bd + 0.08, hb - 0.12, hb, '#aeb6bc', 1); if (k.l) R(a0, a0 + 0.07, 0, bd, 0.12, hb, '#5a636b', 1); if (k.r) R(a1 - 0.07, a1, 0, bd, 0.12, hb, '#5a636b', 1);
+      R(c - 0.8, c + 0.8, 0.12, bd - 0.3, hb, hb + 0.35, GLB); R(c - 0.8, c + 0.8, 0.12, bd - 0.3, hb + 0.35, hb + 0.4, '#aeb6bc', 1);
+      for (let m = 0; m < 5; m++) R(c - 0.8 + m * 0.4, c - 0.8 + m * 0.4 + 0.02, 0.1, bd - 0.28, hb, hb + 0.35, STEEL);
+    }
+  };
+  if (blk && (p.oes || 'glass') !== 'glass') entBlk(p.oes, blk);
+  else if (blk) {
     const hb = Math.min(hF + 0.22, zcap - 0.02), bd = blk.bd, stone = mix(base, 1.04), STN = [mix(stone, 1.08), mix(stone, 0.84), mix(stone, 0.66)], hg = Math.max(0.9, hb * 0.5), TH = 0.1;   // TH: the thick reveal at each end
     const GLB = ['rgba(150,200,226,0.5)', 'rgba(112,166,196,0.56)', 'rgba(80,134,164,0.62)'], INT = '#16222b', STEEL = '#cfd5da';
     const a0 = blk.a0, a1 = blk.a1, gx0 = blk.l ? a0 + TH : a0, gx1 = blk.r ? a1 - TH : a1;
@@ -2987,15 +3061,31 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     else { const d = bandSub(o, 0, 1, f0, f1); q = lx ? [r[0] + a * (r[2] - r[0]), d[1], r[0] + b * (r[2] - r[0]), d[3]] : [d[0], r[1] + a * (r[3] - r[1]), d[2], r[1] + b * (r[3] - r[1])]; }
     out.push(bx(q[0], q[1], q[2], q[3], z0, z1, c));
   };
+
+  const NEWS = style === 'etfe' || style === 'greenwall' || style === 'timber' || style === 'gabion' || style === 'mill' || style === 'perf' || style === 'mosaic' || style === 'brickpier', hsh = function (a, b) { const x = Math.sin((opt.ix || 0) * 12.9898 + a * 78.233 + b * 37.719) * 43758.5453; return x - Math.floor(x); }, dpN = opt.fdep === 'flat' ? 0 : opt.fdep === 'deep' ? 2 : 1;
+  const BK = function (z0, z1, c, f0, f1) { for (let k = 0; k < 16; k++) S3(z0, z1, c, 0.04 + k * 0.92 / 16, 0.04 + (k + 1) * 0.92 / 16, f0, f1); };   // the backing wall in strips, so the sprite sorter never paints the full-width slab over the pieces in front of it
+  const gfNew = function (z0, z1, wallC, trimC, f0, f1) {   // a ground storey for the newer facades: a dark recess, wall piers, and glazed shopfront, entrance doors or turnstile bays
+    const ix = opt.ix, gfm = opt.fgf || 'mix', gm = ix == null ? 'win' : gfm === 'door' ? (ix % 2 === 0 ? 'door' : 'blank') : gfm === 'turn' ? 'turn' : gfm === 'mix' ? (ix % 2 === 0 ? 'door' : 'turn') : 'win';
+    const ops = gm === 'door' ? [[0.28, 0.72]] : gm === 'turn' ? [[0.06, 0.31], [0.375, 0.625], [0.69, 0.94]] : gm === 'blank' ? [] : [[0.08, 0.46], [0.54, 0.92]], hd = z1 - 0.15;
+    S3(z0, z1, '#1b2127', 0, 1, f1 - 0.1, f1); let x = 0;
+    ops.forEach(function (op) { if (op[0] > x) S3(z0, hd, wallC, x, op[0], f0, f1); x = op[1]; }); if (x < 1) S3(z0, hd, wallC, x, 1, f0, f1);
+    S3(hd, z1, wallC, 0, 1, f0, f1); S3(hd - 0.02, hd, trimC, 0, 1, f0 - 0.1, f1);
+    ops.forEach(function (op) {
+      const a = op[0], b = op[1], m = (a + b) / 2;
+      if (gm === 'door') { S3(z0 + 0.02, hd - 0.03, mix(seatHex || '#2c4a3f', 0.5), a + 0.02, m - 0.006, f1 - 0.14, f1); S3(z0 + 0.02, hd - 0.03, mix(seatHex || '#2c4a3f', 0.5), m + 0.006, b - 0.02, f1 - 0.14, f1); S3(z0 + 0.25, z0 + 0.45, '#a9bcc6', a + 0.05, m - 0.03, f1 - 0.16, f1 - 0.1); S3(z0 + 0.25, z0 + 0.45, '#a9bcc6', m + 0.03, b - 0.05, f1 - 0.16, f1 - 0.1); S3(z0, z0 + 0.03, trimC, a - 0.05, b + 0.05, f0 - 0.4, f1); }
+      else if (gm === 'turn') { S3(z0 + 0.02, z0 + 0.05, '#9aa0a6', a + 0.02, b - 0.02, f1 - 0.3, f1); S3(z0 + 0.04, z0 + 0.3, '#b4bac0', m - 0.012, m + 0.012, f1 - 0.34, f1 - 0.2); for (let t = 0; t < 3; t++) S3(z0 + 0.2 + t * 0.04, z0 + 0.212 + t * 0.04, '#7d848b', m - 0.06, m + 0.06, f1 - 0.36, f1 - 0.22); S3(hd - 0.03, hd - 0.01, '#f1c40f', a, b, f0, f1); }
+      else { S3(z0 + 0.1, hd - 0.02, '#8fa9b8', a + 0.015, b - 0.015, f1 - 0.2, f1 - 0.1); S3(z0 + 0.1, hd - 0.02, trimC, m - 0.007, m + 0.007, f1 - 0.24, f1 - 0.08); S3(z0 + 0.08, z0 + 0.1, trimC, a, b, f0 - 0.1, f1 - 0.08); }
+    });
+  };
   const win = function (za, zb, a, b, fr, gl, sill, lint) {   // framed window with mullion, transom, sill and lintel
     const m = (a + b) / 2, t = (za + zb) / 2;
     S3(za, zb, fr, a, b, 0.4, 1); S3(za + 0.02, zb - 0.02, gl, a + (b - a) * 0.07, b - (b - a) * 0.07, 0.7, 1);
     S3(za, zb, fr, m - 0.007, m + 0.007, 0.3, 0.9); S3(t - 0.009, t + 0.009, fr, a, b, 0.3, 0.9);
     S3(za - 0.035, za, sill, a - 0.025, b + 0.025, 0, 0.7); S3(zb, zb + 0.035, lint, a - 0.02, b + 0.02, 0, 0.6);
   };
-  if (style === 'brick' && o) {   // Victorian load-bearing brick: recessed openings with real reveals, stone dressings, string courses, cornice, and optional Dutch gables or projecting pavilions
-    const base = wc0 || '#9a4a35', stone = fc0 || '#dccfb4', FRM = '#ece8dc', GLS = '#27313a', dep = opt.fdep === 'flat' ? 0 : opt.fdep === 'deep' ? 2 : 1, wk = opt.fwin || 'sash', gk = opt.fgab || 'none';
-    const DP = [{ wf: 0.3, pf: 0.3, bf: 0.3, cf: 0, vf: 0, rv: 0.55 }, { wf: 0.55, pf: -0.15, bf: 0.05, cf: -0.35, vf: -0.35, rv: 0.8 }, { wf: 0.8, pf: -0.7, bf: -0.25, cf: -1.0, vf: -1.4, rv: 0.95 }][dep];
+  if ((style === 'brick' || style === 'towers') && o) {   // Victorian load-bearing brick: recessed openings with real reveals, stone dressings, string courses, cornice, and optional Dutch gables or projecting pavilions
+    const tw = style === 'towers', base = wc0 || (tw ? '#a9503a' : '#9a4a35'), stone = fc0 || (tw ? '#e4d6b6' : '#dccfb4'), FRM = '#ece8dc', GLS = '#27313a', dep = opt.fdep === 'flat' ? 0 : opt.fdep === 'deep' ? 2 : 1, wk = opt.fwin || 'sash', gk = opt.fgab || 'none';
+    const DP = [{ wf: 0.3, pf: 0.3, bf: 0.3, cf: 0, vf: 0, rv: 0.55 }, { wf: 0.55, pf: -0.35, bf: -0.1, cf: -0.6, vf: -0.6, rv: 0.8 }, { wf: 0.8, pf: -1.3, bf: -0.6, cf: -1.6, vf: -2.0, rv: 0.95 }][dep];
     const ix = opt.ix, nn = opt.n, pav = gk === 'pavilion' && nn >= 5 && (ix === 0 || ix === nn - 1 || ix === (nn >> 1)), gab = pav || (gk === 'gables' && ix != null && ix % 3 === 1);
     const WF = pav ? Math.min(DP.vf, DP.wf - 0.3) : DP.wf, PF = pav ? WF - 0.1 : DP.pf, RV = pav ? WF + 0.45 : DP.rv, zp = 0.16, ns = Math.max(1, Math.min(5, Math.round((hF - 0.36) / 0.9))), sh = (hF - zp - 0.2) / ns, zt = zp + ns * sh;
     const W = function (z0, z1, c, a, b, f0, f1) { const n0 = out.length; S3(z0, z1, c, a, b, f0, f1); if (out.length > n0) out[out.length - 1][12] = 'b'; };
@@ -3004,12 +3094,13 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     S3(zp, zt, GLS, 0, 1, RV, 1);   // the recessed back plane: it is the glass wherever the wall has an opening
     W(zp, zt, mix(base, 1.08), 0, 0.07, PF, 1); W(zp, zt, mix(base, 1.08), 0.93, 1, PF, 1);   // corner piers
     for (let s = 0; s < ns; s++) {
-      const gm = s === 0 ? gf : 'win', opsS = gm === 'turn' ? ops3 : gm === 'door' ? [[0.28, 0.72]] : gm === 'blank' ? [] : ops, z0 = zp + s * sh, z1 = z0 + sh, sill = z0 + (gm === 'door' ? 0.03 : gm === 'turn' ? 0.02 : 0.26 * sh), head = z0 + (gm === 'door' || gm === 'turn' ? (wk === 'arch' ? 0.72 : 0.82) : (wk === 'arch' ? 0.7 : 0.8)) * sh, ra = wk === 'arch' ? Math.min(0.13, Math.max(0.04, z1 - 0.07 - head)) : wk === 'segment' ? 0.05 : 0;
+      const WL = tw && s === 0 ? function (z0, z1, c, a, b, f0, f1) { S3(z0, z1, mix(stone, 0.94), a, b, f0, f1); } : W, gm = s === 0 ? gf : 'win', opsS = gm === 'turn' ? ops3 : gm === 'door' ? [[0.28, 0.72]] : gm === 'blank' ? [] : ops, z0 = zp + s * sh, z1 = z0 + sh, sill = z0 + (gm === 'door' ? 0.03 : gm === 'turn' ? 0.02 : 0.26 * sh), head = z0 + (gm === 'door' || gm === 'turn' ? (wk === 'arch' ? 0.72 : 0.82) : (wk === 'arch' ? 0.7 : 0.8)) * sh, ra = wk === 'arch' ? Math.min(0.13, Math.max(0.04, z1 - 0.07 - head)) : wk === 'segment' ? 0.05 : 0;
       const ew = wk === 'arch' ? [0.22, 0.12, 0.05] : wk === 'segment' ? [0.12, 0.05] : [];
-      let x = 0.07; if (sill - z0 > 0.025) W(z0, sill, base, 0.07, 0.93, WF, RV);
-      opsS.forEach(function (op) { if (op[0] > x) W(sill, head + ra, base, x, op[0], WF, RV); x = op[1]; });
-      if (x < 0.93) W(sill, head + ra, base, x, 0.93, WF, RV);
-      W(head + ra, z1, base, 0.07, 0.93, WF, RV);
+      let x = 0.07; if (sill - z0 > 0.025) WL(z0, sill, base, 0.07, 0.93, WF, RV);
+      opsS.forEach(function (op) { if (op[0] > x) WL(sill, head + ra, base, x, op[0], WF, RV); x = op[1]; });
+      if (x < 0.93) WL(sill, head + ra, base, x, 0.93, WF, RV);
+      WL(head + ra, z1, base, 0.07, 0.93, WF, RV);
+      if (tw) { if (s === 0) for (let k = 1; k < 8; k++) S3(z0 + k * sh / 8, z0 + k * sh / 8 + 0.01, mix(stone, 0.62), 0.07, 0.93, WF - 0.01, WF + 0.04); else { S3(z0 + sh * 0.02, z1 - sh * 0.02, stone, 0.46, 0.54, PF - 0.06, RV); S3(z1 - sh * 0.1, z1 - sh * 0.02, stone, 0.43, 0.57, PF - 0.1, RV); } for (let q = 0; q < 4; q++) { const zq = z0 + (q + 0.5) * sh / 4; S3(zq - sh * 0.1, zq + sh * 0.1, stone, 0, q % 2 ? 0.11 : 0.08, PF - 0.04, RV); S3(zq - sh * 0.1, zq + sh * 0.1, stone, q % 2 ? 0.89 : 0.92, 1, PF - 0.04, RV); } }
       opsS.forEach(function (op) {
         const a = op[0], b = op[1], m = (a + b) / 2, Wd = b - a, hs = ra / Math.max(1, ew.length);
         ew.forEach(function (k, q) { W(head + q * hs, head + (q + 1) * hs, base, a, a + k * Wd, WF, RV); W(head + q * hs, head + (q + 1) * hs, base, b - k * Wd, b, WF, RV); });
@@ -3040,8 +3131,19 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     }
     W(zt, hF - 0.06, mix(base, 0.95), 0, 1, WF, RV); W(hF - 0.06, hF - 0.02, mix(base, 0.8), 0, 1, DP.cf + 0.25, RV);   // frieze and a brick corbel course
     S3(hF - 0.02, hF + 0.03, stone, 0, 1, DP.cf, RV);   // stone cornice
-    W(hF + 0.03, hF + 0.14, base, 0, 1, DP.cf + 0.3, RV); S3(hF + 0.14, hF + 0.17, stone, 0, 1, DP.cf + 0.2, RV);   // parapet and coping
+    if (tw) { W(hF + 0.03, hF + 0.07, base, 0, 1, DP.cf + 0.3, RV); S3(hF + 0.07, hF + 0.09, stone, 0, 1, DP.cf + 0.1, RV); for (let k = 0; k <= 9; k++) { const bx0 = 0.03 + k * 0.1; S3(hF + 0.09, hF + 0.145, stone, bx0 - 0.014, bx0 + 0.014, DP.cf + 0.15, DP.cf + 0.55); } S3(hF + 0.145, hF + 0.17, stone, 0, 1, DP.cf + 0.05, DP.cf + 0.7); }
+    else { W(hF + 0.03, hF + 0.14, base, 0, 1, DP.cf + 0.3, RV); S3(hF + 0.14, hF + 0.17, stone, 0, 1, DP.cf + 0.2, RV); }   // parapet (a stone balustrade on towers) and coping
     if (gab) { const st = [[0.08, 0.92], [0.16, 0.84], [0.26, 0.74], [0.38, 0.62]]; st.forEach(function (q, k) { const z0 = hF + 0.17 + k * 0.16; W(z0, z0 + 0.16, base, q[0], q[1], WF + 0.1, RV); S3(z0 + 0.16, z0 + 0.19, stone, q[0] - 0.02, q[1] + 0.02, WF, RV); }); S3(hF + 0.81, hF + 0.97, stone, 0.46, 0.54, WF + 0.2, RV); }   // a stepped Dutch gable with stone copings and a finial
+    if (tw && gk === 'pediment' && ix != null && ix % 3 === 1) { for (let k = 0; k < 5; k++) { const z0 = hF + 0.17 + k * 0.085, a = 0.1 + k * 0.08; S3(z0, z0 + 0.085, stone, a, 1 - a, DP.cf + 0.05, RV); } S3(hF + 0.3, hF + 0.36, '#27313a', 0.46, 0.54, DP.cf - 0.05, RV); S3(hF + 0.6, hF + 0.64, stone, 0.47, 0.53, DP.cf - 0.1, RV); }   // a stone pediment with a dark oculus
+    if (tw && tower) {   // a square corner turret: brick shaft with stone quoins and a slit window, a stone cornice, then a stepped slate pyramid or a copper dome
+      const a = opt.tr ? 0.64 : 0.02, b = opt.tr ? 0.98 : 0.36, TF = DP.cf - 0.35, th = hF + 0.95; W(hF + 0.17, th, base, a, b, TF, RV);
+      for (let q = 0; q < 5; q++) { const zq = hF + 0.17 + (q + 0.5) * (th - hF - 0.17) / 5; S3(zq - 0.07, zq + 0.07, stone, a, a + (q % 2 ? 0.06 : 0.045), TF - 0.04, RV); S3(zq - 0.07, zq + 0.07, stone, b - (q % 2 ? 0.045 : 0.06), b, TF - 0.04, RV); }
+      const ma = (a + b) / 2; S3(hF + 0.4, hF + 0.72, '#27313a', ma - 0.04, ma + 0.04, TF - 0.02, RV); S3(hF + 0.37, hF + 0.4, stone, ma - 0.065, ma + 0.065, TF - 0.08, RV); S3(hF + 0.72, hF + 0.75, stone, ma - 0.065, ma + 0.065, TF - 0.08, RV);
+      S3(th, th + 0.05, stone, a - 0.02, b + 0.02, TF - 0.12, RV);
+      const rc = gk === 'dome' ? '#6f9a8a' : '#4a525c', sq = gk === 'dome' ? [[0.1, 0.1], [0.07, 0.1], [0.045, 0.09], [0.02, 0.08]] : [[0.04, 0.1], [0.09, 0.1], [0.14, 0.1], [0.19, 0.1]];
+      sq.forEach(function (u, k) { const z0 = th + 0.05 + k * 0.1; S3(z0, z0 + 0.1, rc, a + u[0] * (gk === 'dome' ? 1 : 1) + (gk === 'dome' ? 0.02 : 0), b - u[0] - (gk === 'dome' ? 0.02 : 0), TF - 0.04 + k * 0.03, RV); });
+      S3(th + 0.45, th + 0.62, '#d9c27a', ma - 0.012, ma + 0.012, TF + 0.1, TF + 0.2);
+    }
   }
   else if (style === 'brick' || style === 'towers') {   // load-bearing wall: plinth, pilasters, brick courses, framed sash windows, coping
     const tw = style === 'towers', base = wc0 || (tw ? '#c9a77a' : '#9a4a35'), stone = tw ? '#e6d3ad' : '#d2b79a', GL = tw ? '#5f7280' : '#2a3036', FR = tw ? '#4b4034' : '#1b1e22';
@@ -3054,6 +3156,136 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     S3(hF - 0.05, hF + 0.0, stone, 0, 1, 0, 1.1); S3(hF, hF + 0.07, fc0 || mix(base, 0.62), 0, 1, 0, 1.1);
     if (tw && tower) { const t = opt.tr ? seg(0.7, 1) : seg(0, 0.3); add(0, hF + 0.55, mix(base, 1.08), t); add(hF + 0.55, hF + 0.62, '#8b7050', t); }
   }
+  else if (style === 'etfe') {   // an inflated cushion skin in the club colour: a dark steel frame, bonded rows of foil cushions that bulge in stepped layers, aluminium ribs, a steel eave
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, bul = [0.3, 0.8, 1.5][dpN], base = '#3a4248', cs = mix(seatHex || '#2b57c4', 1.8), cs2 = mix(seatHex || '#2b57c4', 1.55), rows = Math.max(2, Math.round((hF - gz - 0.1) / 0.42)), rh = (hF - 0.1 - gz) / rows, NC = 4;
+    S3(0, zp, mix('#9aa0a6', 0.7), 0, 1, 0.3, 1); BK(zp, hF, base, RV, 1); gfNew(zp, gz, '#aeb6bc', '#e2e6e9', 0.4, RV);
+    for (let rI = 0; rI < rows; rI++) {
+      const z0 = gz + rI * rh, off = rI % 2 ? 0.5 / NC : 0, nn = NC + (off ? 1 : 0);
+      for (let c = 0; c < nn; c++) {
+        const a = c / NC - off + 0.012, b = (c + 1) / NC - off - 0.012, A = Math.max(0, a), B = Math.min(1, b); if (B - A < 0.03) continue;
+        const dz = rh * 0.08, ww = B - A, pc = (hsh(rI, c) > 0.55 ? cs : cs2), edge = (A > a || B < b) ? 0 : 1;
+        S3(z0 + dz, z0 + rh - dz, mix(pc, 0.72), A, B, RV - 0.12 - bul * 0.25, RV);
+        S3(z0 + dz * 2.2, z0 + rh - dz * 2.2, mix(pc, 0.9), A + ww * 0.1, B - ww * 0.1, RV - 0.12 - bul * 0.55, RV - 0.1);
+        S3(z0 + dz * 3.6, z0 + rh - dz * 3.6, pc, A + ww * 0.22, B - ww * 0.22, RV - 0.12 - bul * 0.85, RV - 0.2);
+        if (edge) S3(z0 + dz * 5, z0 + rh - dz * 5, mix(pc, 1.18), A + ww * 0.36, B - ww * 0.36, RV - 0.12 - bul, RV - 0.3);
+      }
+      S3(z0 - 0.012, z0 + 0.012, '#d3d8dc', 0, 1, RV - 0.12 - bul * 0.45, RV);
+    }
+    for (let c = 0; c <= NC; c += 1) S3(gz, hF - 0.1, '#c7ccd0', c / NC - 0.008, c / NC + 0.008, RV - 0.2 - bul * 0.4, RV);
+    S3(hF - 0.1, hF + 0.02, '#4a5258', 0, 1, RV - 0.2 - bul * 0.3, RV); S3(hF + 0.02, hF + 0.07, '#d3d8dc', 0, 1, -0.3 - bul * 0.4, RV - 0.1);
+  }
+  else if (style === 'greenwall') {   // a living wall: concrete planter troughs stacked up a dark backing, dense mixed foliage that grows out of each trough, a few flowers, a steel cap
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, gr = [0.4, 0.9, 1.5][dpN], rows = Math.max(2, Math.round((hF - gz - 0.1) / 0.4)), rh = (hF - 0.1 - gz) / rows, GREENS = ['#2f6b2e', '#3d7f35', '#4f9440', '#27582a', '#5aa04a', '#6a8f3a', '#356b3c'];
+    S3(0, zp, mix('#9aa0a6', 0.7), 0, 1, 0.3, 1); BK(zp, hF, '#2a3326', RV, 1); gfNew(zp, gz, '#8d949a', '#c4c8cc', 0.3, RV);
+    for (let rI = 0; rI < rows; rI++) {
+      const z0 = gz + rI * rh; S3(z0, z0 + 0.07, '#9ba0a4', 0, 1, RV - 0.5 - gr * 0.3, RV); S3(z0 + 0.07, z0 + 0.09, '#7c8286', 0, 1, RV - 0.5 - gr * 0.3, RV - 0.35);
+      const NF = 11;
+      for (let c = 0; c < NF; c++) {
+        const hh = rh - 0.12 + (hsh(rI, c) - 0.5) * 0.12, pj = RV - 0.28 - gr * (0.3 + 0.7 * hsh(c, rI)), col = GREENS[Math.floor(hsh(rI + 3, c) * GREENS.length)], a = c / NF, b = (c + 1) / NF;
+        S3(z0 + 0.09, z0 + 0.09 + hh, mix(col, 0.8 + 0.3 * hsh(c, 9)), a + 0.004, b - 0.004, pj, RV - 0.05);
+        S3(z0 + 0.09 + hh * 0.55, z0 + 0.09 + hh * 0.95, mix(col, 1.05 + 0.2 * hsh(c, 4)), a + 0.015, b - 0.015, pj - 0.18 * gr, pj + 0.1);
+        if (hsh(rI * 5 + 1, c + 7) > 0.88) S3(z0 + 0.09 + hh * 0.7, z0 + 0.09 + hh * 0.7 + 0.04, hsh(c, rI) > 0.5 ? '#e8d34a' : '#e07aa0', a + 0.03, b - 0.03, pj - 0.3 * gr - 0.04, pj - 0.1);
+      }
+    }
+    S3(hF - 0.1, hF + 0.04, '#586068', 0, 1, RV - 0.3, RV); S3(hF + 0.04, hF + 0.07, '#7a838a', 0, 1, RV - 0.4, RV - 0.1);
+  }
+  else if (style === 'timber') {   // vertical timber boards in mixed tones with deep shadow gaps, tall slot windows behind sparse timber fins, a dark cantilevered roof edge
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, pj = [0.1, 0.5, 1.1][dpN], NB = 7, TONES = ['#b98a55', '#a87a48', '#c49a64', '#9a6c3f', '#b28450'], wz0 = gz + (hF - gz) * 0.34, wz1 = gz + (hF - gz) * 0.78, hasW = false;
+    S3(0, zp, '#5a4a3a', 0, 1, 0.3, 1); gfNew(zp, gz, '#6f5237', '#d8c7a6', 0.35, RV);
+    if (hasW) { S3(wz0, wz1, '#c9a574', 0.04, 0.96, RV - 0.05, RV); S3(wz0 + 0.03, wz1 - 0.03, '#a9c4d0', 0.07, 0.93, RV - 0.12, RV - 0.05); S3(wz0 - 0.02, wz0, '#d8c7a6', 0.03, 0.97, RV - 0.35, RV); S3(wz1, wz1 + 0.02, '#d8c7a6', 0.03, 0.97, RV - 0.35, RV); }
+    for (let k = 0; k < NB; k++) {
+      const a = k / NB, b = (k + 1) / NB, col = TONES[Math.floor(hsh(k, 1) * TONES.length)], pf = RV - 0.4 - pj * (0.4 + 0.6 * hsh(k, 2)), inWin = hasW && a >= 0.04 && b <= 0.96;
+      if (inWin) { S3(gz, wz0, mix(col, 0.95), a, b, pf, RV); S3(wz1, hF - 0.1, mix(col, 0.95), a, b, pf, RV); if (k % 2 === 0) S3(wz0, wz1, mix(col, 0.9), a + 0.012, b - 0.012, pf - 0.3 - pj * 0.3, RV - 0.1); }
+      else S3(gz, hF - 0.1, mix(col, 0.9 + 0.15 * hsh(k, 3)), a, b, pf, RV + 0.04);
+    }
+    S3(hF - 0.1, hF + 0.02, '#a87a48', 0, 1, RV - 0.5 - pj * 0.4, RV); S3(hF + 0.02, hF + 0.08, '#c49a64', 0, 1, -0.5 - pj * 0.6, RV - 0.2);
+  }
+  else if (style === 'gabion') {   // wire-caged stone: irregular courses of mixed grey and sand stone behind horizontal steel straps, corten steel piers and fascia
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, pj = [0.1, 0.4, 0.9][dpN], STONES = ['#8f8a80', '#a39d90', '#7b776f', '#b2a995', '#6f6c66', '#9a9486'], CR = 0.115, nr = Math.max(2, Math.round((hF - 0.1 - gz) / CR)), rh = (hF - 0.1 - gz) / nr;
+    S3(0, zp, '#55524c', 0, 1, 0.3, 1); BK(zp, hF, '#9a9486', RV, 1); gfNew(zp, gz, '#5f5b54', '#8a4b2d', 0.35, RV);
+    for (let rI = 0; rI < nr; rI++) {
+      const z0 = gz + rI * rh; let x = hsh(rI, 5) * 0.06;
+      S3(z0, z0 + rh, mix(STONES[0], 1.0), 0, 1, RV - 0.3 - pj * 0.3, RV);
+      while (x < 1) {
+        const w = 0.1 + hsh(rI, x * 50) * 0.12, e = Math.min(1, x + w), col = STONES[Math.floor(hsh(rI * 3 + 1, x * 97) * STONES.length)];
+        S3(z0 + 0.008, z0 + rh - 0.008, mix(col, 1.12 + 0.25 * hsh(x * 31, rI)), x, e, RV - 0.36 - pj * (0.35 + 0.65 * hsh(rI, x * 13)), RV - 0.1); x = e;
+      }
+      if (rI % 3 === 2) S3(z0 + rh - 0.016, z0 + rh + 0.008, '#8a6a4c', 0, 1, RV - 0.5 - pj * 0.5, RV - 0.1);
+    }
+    for (const pa of [[0, 0.045], [0.955, 1], [0.48, 0.52]]) S3(zp, hF - 0.1, '#8a4b2d', pa[0], pa[1], RV - 0.55 - pj * 0.7, RV);
+    S3(hF - 0.1, hF + 0.03, '#8a4b2d', 0, 1, RV - 0.6 - pj * 0.6, RV); S3(hF + 0.03, hF + 0.06, '#6e3a22', 0, 1, -0.2 - pj * 0.5, RV - 0.3);
+  }
+  else if (NEWS && !o) {   // the plain end sections and filler panels (built without the detail path): a solid wall in the style's own colour
+    const fb = { etfe: mix(seatHex || '#2b57c4', 1.5), greenwall: '#3d7f35', timber: '#a87a48', gabion: '#8f8a80', mill: '#7a3e2e', perf: '#b49a6a', mosaic: mix(seatHex || '#2b57c4', 1.1), brickpier: '#a1503a' }[style];
+    S3(0, hF, fb, 0, 1, 0.3, 1); S3(0, 0.12, mix(fb, 0.6), 0, 1, 0.1, 1); S3(hF - 0.03, hF + 0.05, mix(fb, 0.7), 0, 1, 0, 1);
+  }
+  else if (style === 'brickpier' && o) {   // brick piers and glass: bonded brick piers at every bay line, glazed bays between them, brick spandrels at each floor and a deep stone-coped brick fascia
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, pj = [0.05, 0.2, 0.45][dpN], base = wc0 || '#a1503a', stone = fc0 || '#d8ccb2', ns = Math.max(1, Math.round((hF - gz - 0.45) / 0.9)), sh = (hF - gz - 0.45) / ns, zt = hF - 0.45, Wb = function (z0, z1, c, a, b, f0, f1) { const n0 = out.length; S3(z0, z1, c, a, b, f0, f1); if (out.length > n0) out[out.length - 1][12] = 'b'; };
+    S3(0, zp, mix(base, 0.55), 0, 1, 0.3, 1); BK(zp, hF, '#2f4a5a', RV, 1); gfNew(zp, gz, base, stone, 0.3, RV);
+    for (let sI = 0; sI < ns; sI++) {
+      const z0 = gz + sI * sh, z1 = z0 + sh;
+      S3(z0 + 0.2, z1 - 0.04, '#6f9db3', 0.1, 0.9, RV - 0.08, RV - 0.05); S3(z0 + 0.2, z1 - 0.04, '#3d6074', 0.1, 0.9, RV - 0.04, RV - 0.01);
+      for (let m = 1; m < 3; m++) { const a = 0.1 + 0.8 * m / 3; S3(z0 + 0.2, z1 - 0.04, '#dfe4e7', a - 0.006, a + 0.006, RV - 0.1, RV - 0.04); }
+      Wb(z0, z0 + 0.2, base, 0.1, 0.9, RV - 0.22 - pj * 0.5, RV - 0.05); S3(z0 + 0.19, z0 + 0.21, stone, 0.1, 0.9, RV - 0.25 - pj * 0.5, RV - 0.05);
+    }
+    for (const px of [[0, 0.1], [0.9, 1]]) Wb(gz, zt, base, px[0], px[1], RV - 0.4 - pj, RV - 0.02);
+    Wb(zt, hF, base, 0, 1, RV - 0.45 - pj * 0.5, RV - 0.02); S3(zt - 0.04, zt, stone, 0, 1, RV - 0.5 - pj * 0.5, RV - 0.05); S3(hF - 0.06, hF + 0.03, stone, 0, 1, RV - 0.55 - pj * 0.5, RV - 0.05);
+  }
+  else if (style === 'mill' && o) {   // Victorian mill: dark brick, tall iron-framed windows under stone heads, a sawtooth glazed roof and the odd tall chimney stack
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, WF = [0.75, 0.5, 0.15][dpN], base = wc0 || '#7a3e2e', stone = fc0 || '#c9bfa8', ns = Math.max(1, Math.round((hF - gz - 0.3) / 0.8)), sh = (hF - gz - 0.14) / ns, zt = gz + ns * sh, ix = opt.ix, nn = opt.n;
+    const Wb = function (z0, z1, c, a, b, f0, f1) { const n0 = out.length; S3(z0, z1, c, a, b, f0, f1); if (out.length > n0) out[out.length - 1][12] = 'b'; };
+    S3(0, zp, mix('#6a6e72', 1), 0, 1, 0.25, 1); BK(zp, hF, '#27323a', RV, 1); gfNew(zp, gz, base, stone, 0.3, RV);
+    for (let sI = 0; sI < ns; sI++) {
+      const z0 = gz + sI * sh, z1 = z0 + sh, sill = z0 + 0.14 * sh, head = z0 + 0.82 * sh, ops = [[0.1, 0.45], [0.55, 0.9]];
+      Wb(z0, sill, base, 0, 1, WF, RV); Wb(head, z1, base, 0, 1, WF, RV); Wb(sill, head, base, 0, 0.1, WF, RV); Wb(sill, head, base, 0.45, 0.55, WF, RV); Wb(sill, head, base, 0.9, 1, WF, RV);
+      ops.forEach(function (op) {
+        const a = op[0], b = op[1], m = (a + b) / 2;
+        S3(sill, head, '#1a1d20', a, b, RV - 0.1, RV); S3(sill + 0.02, head - 0.02, '#8fb0c0', a + 0.012, b - 0.012, RV - 0.12, RV - 0.04);
+        for (let k = 1; k < 4; k++) { const vx = a + (b - a) * k / 4; S3(sill + 0.02, head - 0.02, '#1a1d20', vx - 0.007, vx + 0.007, RV - 0.14, RV - 0.02); }
+        for (let k = 1; k < 4; k++) { const hz = sill + (head - sill) * k / 4; S3(hz - 0.007, hz + 0.007, '#1a1d20', a + 0.012, b - 0.012, RV - 0.14, RV - 0.02); }
+        S3(sill - 0.035, sill, stone, a - 0.02, b + 0.02, WF - 0.25, RV); S3(head, head + 0.05, stone, a - 0.02, b + 0.02, WF - 0.25, RV);
+        for (let k = 0; k < 5; k++) S3(head + 0.05 + k * 0.012, head + 0.062 + k * 0.012, mix(stone, 0.85 + 0.05 * k), a + 0.02 * k, b - 0.02 * k, WF - 0.15, RV);   // a stepped segmental head
+      });
+      if (sI < ns - 1) S3(z1 - 0.012, z1 + 0.012, stone, 0, 1, WF - 0.18, RV);
+    }
+    Wb(zt, hF - 0.04, base, 0, 1, WF - 0.1, RV); S3(hF - 0.04, hF + 0.04, stone, 0, 1, WF - 0.3, RV); Wb(hF + 0.04, hF + 0.13, base, 0, 1, WF, RV); S3(hF + 0.13, hF + 0.16, stone, 0, 1, WF - 0.12, RV);
+    for (let k = 0; k < 3; k++) { const a = k / 3, b = (k + 1) / 3; for (let j = 0; j < 5; j++) S3(hF + 0.16, hF + 0.16 + 0.07 * (j + 1), '#6d767d', a + (b - a) * j / 5, b - 0.02, 0.6, RV - 0.05); S3(hF + 0.16, hF + 0.16 + 0.35, '#8fb0c0', b - 0.045, b - 0.015, 0.55, RV - 0.12); S3(hF + 0.16, hF + 0.51, '#4a5258', b - 0.015, b, 0.5, RV - 0.1); }
+    if (ix != null && nn >= 4 && ix % 4 === 2) { for (let j = 0; j < 6; j++) { const w = 0.1 - j * 0.004, z0 = hF + 0.16 + j * 0.2; Wb(z0, z0 + 0.2, base, 0.5 - w, 0.5 + w, 0.45, 0.85); } S3(hF + 1.36, hF + 1.42, stone, 0.38, 0.62, 0.4, 0.9); S3(hF + 1.42, hF + 1.5, '#1a1d20', 0.43, 0.57, 0.45, 0.85); }
+  }
+  else if (style === 'perf' && o) {   // a perforated metal screen: anodised panels standing off a lit glass wall, hole sizes growing up the screen
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, off = [0.5, 1.0, 1.8][dpN], rows = Math.max(2, Math.round((hF - gz - 0.1) / 0.5)), rh = (hF - 0.1 - gz) / rows, NC = 4, pc = mix(seatHex || '#2b57c4', 1.35), metal = mix('#b8a37a', 1.0);
+    S3(0, zp, '#5a5e62', 0, 1, 0.3, 1); BK(zp, hF, '#202a31', RV, 1); S3(gz, hF - 0.1, '#7fa4b6', 0.02, 0.98, RV - 0.1, RV - 0.04); gfNew(zp, gz, '#8d9298', '#d6d9dc', 0.3, RV);
+    for (let rI = 0; rI < rows; rI++) for (let c = 0; c < NC; c++) {
+      const z0 = gz + rI * rh, a = c / NC + 0.006, b = (c + 1) / NC - 0.006, col = (rI + c) % 3 === 0 ? pc : metal, f0 = RV - off, f1 = RV - off + 0.1;
+      S3(z0 + 0.01, z0 + rh - 0.01, col, a, b, f0, f1);
+      const hs = 0.02 + 0.014 * (rI + 1) / rows * 2, nx = 3, nz = 2;
+      for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) { const cx = a + (b - a) * (i + 0.5) / nx, cz = z0 + rh * (j + 0.5) / nz, w = (b - a) * hs * 3.2 * (0.7 + 0.4 * hsh(i + c * 3, j + rI * 7)); S3(cz - w * 1.1, cz + w * 1.1, '#101820', cx - w * 0.5, cx + w * 0.5, f0 - 0.02, f1 - 0.08); }
+    }
+    for (let c = 0; c <= NC; c++) { S3(gz, hF - 0.1, '#3c4348', c / NC - 0.007, c / NC + 0.007, RV - off, RV); } S3(hF - 0.1, hF + 0.05, '#2c343a', 0, 1, RV - off - 0.1, RV); S3(hF + 0.05, hF + 0.08, '#8d9298', 0, 1, RV - off - 0.2, RV - 0.1);
+  }
+  else if (style === 'mosaic' && o) {   // a glazed ceramic tile mural in the club colours: small tiles in diagonal bands that carry on from one bay to the next
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, pj = [0.05, 0.35, 0.8][dpN], NC = 10, rows = Math.max(3, Math.round((hF - gz - 0.1) / 0.17)), rh = (hF - 0.1 - gz) / rows, sc = seatHex || '#2b57c4', PAL = [sc, mix(sc, 1.55), '#e9ecee', mix(sc, 0.62), '#e6c41d'], ix = opt.ix || 0;
+    S3(0, zp, '#6a6e72', 0, 1, 0.3, 1); BK(zp, hF, mix(sc, 0.4), RV, 1); gfNew(zp, gz, mix(sc, 0.8), '#e9ecee', 0.3, RV);
+    for (let rI = 0; rI < rows; rI++) for (let c = 0; c < NC; c++) {
+      const u = c + ix * NC, v = ((u + rI * 2) % 16 + 16) % 16, k = v < 6 ? 0 : v < 8 ? 1 : v < 9 ? 4 : v < 13 ? 3 : 2, tint = 0.92 + 0.16 * hsh(u, rI), z0 = gz + rI * rh, a = c / NC, b = (c + 1) / NC;
+      S3(z0 + 0.008, z0 + rh - 0.008, mix(PAL[k], tint), a + 0.004, b - 0.004, RV - 0.12 - pj * (0.4 + 0.6 * hsh(c + 3, rI)), RV - 0.05);
+    }
+    S3(hF - 0.1, hF + 0.03, '#e9ecee', 0, 1, RV - 0.3 - pj * 0.5, RV); S3(hF + 0.03, hF + 0.06, mix(sc, 0.7), 0, 1, RV - 0.4 - pj * 0.6, RV - 0.1);
+  }
+  else if (style === 'deco' && o) {   // art deco: tall stepped piers rising to a ziggurat crest, dark spandrel panels with gold bands, tall glazing strips, a gold sign fin
+    const zp = opt.sk > 0 ? 0 : 0.14, gz = opt.sk > 0 ? 0 : 0.66, RV = 0.9, pj = [0.2, 0.6, 1.3][dpN], cream = wc0 || '#e8dfc8', gold = '#d4a93a', dark = '#20383a', ix = opt.ix, nn = opt.n, ns = Math.max(1, Math.round((hF - gz - 0.25) / 0.8)), sh = (hF - gz - 0.2) / ns, strips = [[0.16, 0.3], [0.43, 0.57], [0.7, 0.84]];
+    S3(0, zp, mix('#4a4f55', 1), 0, 1, 0.25, 1); BK(zp, hF, dark, RV, 1); gfNew(zp, gz, cream, gold, 0.3, RV);
+    S3(gz, hF - 0.08, mix(cream, 0.94), 0, 1, RV - 0.25, RV);
+    for (let sI = 0; sI < ns; sI++) {
+      const z0 = gz + sI * sh, z1 = z0 + sh;
+      strips.forEach(function (st) { S3(z0 + 0.1 * sh, z1 - 0.04, '#162126', st[0], st[1], RV - 0.3, RV - 0.1); S3(z0 + 0.1 * sh + 0.015, z1 - 0.055, '#8fb0c0', st[0] + 0.012, st[1] - 0.012, RV - 0.34, RV - 0.14); for (let k = 1; k < 3; k++) { const hz = z0 + 0.1 * sh + (z1 - 0.04 - z0 - 0.1 * sh) * k / 3; S3(hz - 0.006, hz + 0.006, '#e8dfc8', st[0] + 0.012, st[1] - 0.012, RV - 0.38, RV - 0.12); } });
+      S3(z0 - 0.0, z0 + 0.1 * sh, dark, 0.1, 0.9, RV - 0.36 - pj * 0.1, RV); S3(z0 + 0.04 * sh, z0 + 0.06 * sh, gold, 0.1, 0.9, RV - 0.4 - pj * 0.1, RV - 0.3);
+    }
+    for (const px of [[0, 0.1], [0.34, 0.4], [0.6, 0.66], [0.9, 1]]) { for (let k = 0; k < 3; k++) S3(gz, hF - 0.05 - k * 0.06, mix(cream, 1.1 - k * 0.05), px[0] + k * 0.008 * (px[0] < 0.5 ? 1 : -1) * 0 + (px[1] - px[0]) * 0.0 + (k === 0 ? 0 : (px[1] - px[0]) * 0.18 * k * (px[0] < 0.3 ? 1 : 1)) * 0.5, px[1] - (k === 0 ? 0 : (px[1] - px[0]) * 0.18 * k) * 0.5, RV - 0.5 - pj * (0.4 + 0.3 * k), RV - 0.2); }
+    S3(hF - 0.08, hF + 0.04, cream, 0, 1, RV - 0.5 - pj * 0.4, RV); S3(hF - 0.01, hF + 0.01, gold, 0, 1, RV - 0.55 - pj * 0.4, RV - 0.4);
+    const zc = [[0.18, 0.82], [0.28, 0.72], [0.38, 0.62], [0.46, 0.54]]; zc.forEach(function (q, k) { S3(hF + 0.04 + k * 0.09, hF + 0.13 + k * 0.09, cream, q[0], q[1], RV - 0.5 - pj * 0.3, RV - 0.05); S3(hF + 0.13 + k * 0.09 - 0.012, hF + 0.13 + k * 0.09, gold, q[0], q[1], RV - 0.55 - pj * 0.3, RV - 0.3); });
+    if (ix != null && nn >= 3 && ix % 3 === 1) { S3(hF + 0.4, hF + 1.0, gold, 0.465, 0.535, RV - 0.7, RV - 0.1); S3(hF + 0.4, hF + 1.0, mix(cream, 0.9), 0.44, 0.465, RV - 0.6, RV - 0.1); S3(hF + 0.4, hF + 1.0, mix(cream, 0.8), 0.535, 0.56, RV - 0.6, RV - 0.1); S3(hF + 1.0, hF + 1.05, gold, 0.45, 0.55, RV - 0.7, RV - 0.1); }
+  }
   else if (style === 'buttress') {   // brutalist raking piers: deep concrete wedges leaning out from the stand, built from an ultra-fine stack of thin slices (no outlines between them, so the faces read as one smooth surface), with the stand's own steps showing between them
     const base = wc0 || '#bab7ad', fu = opt.fu || [0.25, 0.75], fi = opt.fu ? opt.fi : 0;
     let LO = 0, HI = 1;   // the two outer fins are let run past the end of the stand
@@ -3062,10 +3294,11 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
       let q;
       if (!o) q = seg(a, b);
       else { const d = bandSub(o, 0, 1, f0, 1); q = lx ? [r[0] + a * (r[2] - r[0]), d[1], r[0] + b * (r[2] - r[0]), d[3]] : [d[0], r[1] + a * (r[3] - r[1]), d[2], r[1] + b * (r[3] - r[1])]; }
-      out.push(bx(q[0], q[1], q[2], q[3], za, zb, finSliceFaces(col, 0.82 + 0.18 * Math.min(1, Math.pow(za / (hF + 1.2), 0.7))), 2));
+      const bdI = Math.floor(za / 0.09), bdF = (za - bdI * 0.09) / 0.09, bdH = Math.sin((bdI + 1) * 12.9898 + (opt.fi || 0) * 4.1) * 43758.5453, bdT = 0.965 + 0.07 * (bdH - Math.floor(bdH)), jn = bdF < 0.07 ? 0.93 : 1, lift = Math.floor(za / 0.72) !== Math.floor((za - 0.02) / 0.72) ? 0.88 : 1, lg = 0.82 + 0.18 * Math.min(1, Math.pow(za / (hF + 1.2), 0.7));
+      out.push(bx(q[0], q[1], q[2], q[3], za, zb, finSliceFaces(mix(col, bdT * jn * lift), lg), 2));
     };
     S3(0, 0.1, mix(base, 0.7), 0, 1, 0.1, 1);
-    S3(0.1, hF, mix(base, 0.8), 0, 1, 0.66, 1);   // the wall behind the piers, a tone darker than the piers themselves
+    for (let z = 0.1, bI = 0; z < hF - 0.001; z += 0.1, bI++) { const hh = Math.sin((bI + 3) * 7.31 + (opt.fi || 0) * 2.3) * 43758.5453, tn = 0.76 + 0.06 * (hh - Math.floor(hh)), z1 = Math.min(hF, z + 0.1); S3(z, z1, mix(base, tn), 0, 1, 0.62 + 0.04 * ((bI * 7 + (opt.fi || 0)) % 3), 1); S3(z, z + 0.008, mix(base, 0.6), 0, 1, 0.66, 1); }   // the wall behind the piers: board-marked concrete, each board a slightly different tone with a dark joint
     fu.forEach(function (cu, jj) {
       const c = cu - fi; if (c < -0.7 || c > 1.7) return;
       LO = jj === 0 && c < 0.5 ? -1 : 0; HI = jj === fu.length - 1 && c > 0.5 ? 2 : 1;
@@ -3099,6 +3332,62 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     S3(za - 0.03, za, '#aab2ba', 0, 1, 0, 0.7); S3(zb, zb + 0.04, '#aab2ba', 0, 1, 0, 0.7);
     S3(hF - 0.03, hF + 0.07, fc0 || '#9aa2aa', 0, 1, 0, 1);
   }
+  else if (style === 'concrete' && o) {   // post-war concrete frame: projecting piers and slab edges, recessed infill panels with ribbon, punched or slot openings, optional stair towers or a cantilevered fascia
+    const base = wc0 || '#b4b8bd', beamC = mix(base, 1.1), GLS = '#25303a', FRK = '#39424a', dep = opt.fdep === 'flat' ? 0 : opt.fdep === 'deep' ? 2 : 1;
+    const wk = ['strip', 'punch', 'slot', 'panel'].indexOf(opt.fwin) >= 0 ? opt.fwin : 'strip', gk = opt.fgab === 'towers' || opt.fgab === 'cantilever' ? opt.fgab : 'none';
+    const DP = [{ wf: 0.3, pf: 0.3, bf: 0.3, cf: 0, rv: 0.55 }, { wf: 0.55, pf: -0.4, bf: -0.4, cf: -0.8, rv: 0.8 }, { wf: 0.8, pf: -1.5, bf: -1.2, cf: -1.8, rv: 0.95 }][dep];
+    const ix = opt.ix, nn = opt.n, tw = gk === 'towers' && ix != null && nn >= 4 && (ix % 4 === 1);
+    const WF = DP.wf, RV = DP.rv, zp = 0.2, ns = Math.max(1, Math.min(5, Math.round((hF - 0.4) / 0.9))), sh = (hF - zp - 0.2) / ns, zt = zp + ns * sh;
+    const gfm = opt.fgf || 'win', gf = ix == null ? 'win' : gfm === 'door' ? (ix % 2 === 0 ? 'door' : 'blank') : gfm === 'turn' ? 'turn' : gfm === 'mix' ? (ix % 2 === 0 ? 'door' : 'turn') : 'win';
+    const ops3 = [[0.06, 0.31], [0.375, 0.625], [0.69, 0.94]], DRC = mix(seatHex || '#2c4a3f', 0.5);
+    S3(0, zp, mix(base, 0.62), 0, 1, DP.pf - 0.05, 1); S3(zp - 0.02, zp, beamC, 0, 1, DP.pf - 0.12, 1);   // dark board-marked plinth
+    S3(zp, zt, GLS, 0, 1, RV, 1);
+    S3(zp, zt, beamC, 0, 0.06, DP.pf, 1); S3(zp, zt, beamC, 0.94, 1, DP.pf, 1);   // frame piers
+    for (let s = 0; s < ns; s++) {
+      const gm = s === 0 ? gf : 'win', z0 = zp + s * sh, z1 = z0 + sh;
+      const ops = gm === 'turn' ? ops3 : gm === 'door' ? [[0.25, 0.75]] : gm === 'blank' ? [] : wk === 'strip' ? [[0.07, 0.93]] : wk === 'punch' ? [[0.12, 0.3], [0.41, 0.59], [0.7, 0.88]] : wk === 'slot' ? [0, 1, 2, 3, 4, 5].map(function (k) { return [0.1 + k * 0.15, 0.15 + k * 0.15]; }) : [];
+      const bt = 0.09, top = z1 - bt;
+      let sill = z0 + (gm === 'door' ? 0.03 : gm === 'turn' ? 0.02 : wk === 'slot' ? 0.1 : 0.3 * sh), head = gm === 'door' || gm === 'turn' ? z0 + 0.82 * sh : wk === 'slot' ? top - 0.06 : z0 + 0.74 * sh;
+      if (head > top - 0.03) head = top - 0.03;
+      let x = 0.06; if (sill - z0 > 0.025) S3(z0, sill, base, 0.06, 0.94, WF, RV);
+      ops.forEach(function (op) { if (op[0] > x) S3(sill, head, base, x, op[0], WF, RV); x = op[1]; });
+      if (x < 0.94) S3(sill, head, base, x, 0.94, WF, RV);
+      S3(head, top, base, 0.06, 0.94, WF, RV);
+      if (wk === 'panel' && gm === 'win') for (let q = 1; q < 4; q++) S3(z0, top, mix(base, 0.55), 0.06 + 0.88 * q / 4 - 0.006, 0.06 + 0.88 * q / 4 + 0.006, WF - 0.06, WF + 0.15);   // shadow joints between precast panels
+      ops.forEach(function (op) {
+        const a = op[0], b = op[1], m = (a + b) / 2;
+        if (gm === 'door') {
+          const dt = head - 0.06; S3(z0 + 0.02, dt, DRC, a + 0.02, m - 0.006, RV - 0.12, RV); S3(z0 + 0.02, dt, DRC, m + 0.006, b - 0.02, RV - 0.12, RV);
+          S3(z0 + 0.02 + (dt - z0) * 0.45, dt - 0.04, '#9db3be', a + 0.05, m - 0.03, RV - 0.14, RV - 0.1); S3(z0 + 0.02 + (dt - z0) * 0.45, dt - 0.04, '#9db3be', m + 0.03, b - 0.05, RV - 0.14, RV - 0.1);
+          S3(head + 0.01, head + 0.065, beamC, a - 0.1, b + 0.1, DP.pf - 0.7, RV);   // a flat concrete canopy over the entrance
+          S3(z0, z0 + 0.03, beamC, a - 0.05, b + 0.05, DP.pf - 0.45, RV);
+        } else if (gm === 'turn') {
+          const px = m, ph = (head - z0) * 0.58; S3(z0 + 0.02, z0 + 0.05, '#9aa0a6', a + 0.02, b - 0.02, RV - 0.3, RV);
+          S3(z0 + 0.04, z0 + 0.04 + ph, '#b4bac0', px - 0.012, px + 0.012, RV - 0.34, RV - 0.2);
+          for (let t = 0; t < 3; t++) S3(z0 + 0.04 + ph * (0.55 + t * 0.15), z0 + 0.04 + ph * (0.55 + t * 0.15) + 0.012, '#7d848b', px - 0.06, px + 0.06, RV - 0.36, RV - 0.22);
+          S3(head - 0.02, head, '#f1c40f', a, b, WF - 0.1, RV);
+        } else if (wk === 'strip') {
+          for (let k = 1; k < 8; k++) { const vx = a + (b - a) * k / 8; S3(sill, head, FRK, vx - 0.008, vx + 0.008, RV - 0.14, RV); }
+          S3((sill + head) / 2 - 0.008, (sill + head) / 2 + 0.008, FRK, a, b, RV - 0.14, RV);
+          S3(sill - 0.03, sill, beamC, a, b, WF - 0.12, RV);
+        } else if (wk === 'punch') {
+          S3(m - 0.007, m + 0.007, FRK, m - 0.007, m + 0.007, RV - 0.1, RV); S3(sill, head, FRK, m - 0.007, m + 0.007, RV - 0.12, RV); S3((sill + head) / 2 - 0.007, (sill + head) / 2 + 0.007, FRK, a, b, RV - 0.12, RV);
+          S3(sill - 0.03, sill, beamC, a - 0.02, b + 0.02, WF - 0.1, RV);
+        }
+      });
+      if (gm === 'blank') { S3(z0 + 0.14, top - 0.1, mix(base, 0.9), 0.2, 0.8, WF - 0.05, RV); S3(z0 + 0.14, z0 + 0.16, mix(base, 0.6), 0.2, 0.8, WF - 0.06, RV); S3(top - 0.12, top - 0.1, mix(base, 0.6), 0.2, 0.8, WF - 0.06, RV); }
+      S3(top, z1 + 0.02, beamC, 0, 1, DP.bf, RV);   // slab edge beam: a deep horizontal band at every floor
+    }
+    const cant = gk === 'cantilever';
+    S3(zt, hF + 0.06, beamC, 0, 1, cant ? DP.cf - 1.1 : DP.cf, RV); if (cant) S3(zt - 0.04, zt, mix(base, 0.45), 0, 1, DP.cf - 0.8, RV);   // top fascia beam; the cantilever version overhangs with a dark soffit
+    S3(hF + 0.06, hF + 0.1, fc0 || mix(base, 0.78), 0, 1, (cant ? DP.cf - 1.1 : DP.cf) + 0.1, RV);
+    if (tw) {   // a stair tower: a deep concrete shaft standing proud of the wall, with tall slot windows and a flat cap
+      const TF = DP.wf - 1.4 - dep * 0.3, TC = mix(base, 0.92);
+      S3(zp, hF + 0.55, TC, 0.14, 0.86, TF, RV); S3(hF + 0.55, hF + 0.63, beamC, 0.11, 0.89, TF - 0.12, RV);
+      for (let k = 0; k < 3; k++) { const c = 0.3 + k * 0.2; S3(zp + 0.15, hF + 0.4, GLS, c - 0.03, c + 0.03, TF - 0.04, TF + 0.2); }
+      for (let s = 1; s < ns + 1; s++) S3(zp + s * sh - 0.015, zp + s * sh + 0.015, mix(base, 0.6), 0.14, 0.86, TF - 0.05, TF + 0.2);
+    }
+  }
   else if (style === 'concrete') {   // precast panels: shadow joints, recessed bands, high slit windows
     const base = wc0 || '#b4b8bd', J = mix(base, 0.55);
     S3(0, hF, base, 0, 1, 0.1, 1); S3(0, 0.1, mix(base, 0.72), 0, 1, 0, 1);
@@ -3107,6 +3396,48 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     for (let i = 0; i < 4; i++) S3(hF * 0.7, hF * 0.82, '#1c242b', 0.1 + i * 0.22, 0.2 + i * 0.22, 0.4, 1);
     S3(hF * 0.7 - 0.02, hF * 0.7, mix(base, 1.12), 0, 1, 0, 0.7);
     S3(hF - 0.03, hF + 0.07, fc0 || mix(base, 0.7), 0, 1, 0, 1);
+  }
+  else if (style === 'glass' && o) {   // modern glazed facade: a steel frame with fins or flush mullions, curtain-wall, ribbon or louvred glazing, an optional canopy or glazed atria, glazed entrances and turnstile bays
+    const base = wc0 || '#6f8fa6', GLC = mix(base, 1.12), SPN = mix(base, 0.5), STL = '#d4d9dd', STD = '#3a4650', INT = '#1d2730', dep = opt.fdep === 'flat' ? 0 : opt.fdep === 'deep' ? 2 : 1;
+    const wk = ['curtain', 'ribbon', 'louvre'].indexOf(opt.fwin) >= 0 ? opt.fwin : 'curtain', gk = opt.fgab === 'canopy' || opt.fgab === 'atrium' ? opt.fgab : 'none';
+    const DP = [{ gf: 0.45, mf: 0.3, cf: 0 }, { gf: 0.6, mf: -0.4, cf: -0.9 }, { gf: 0.78, mf: -1.4, cf: -1.7 }][dep], RV = 0.92;
+    const ix = opt.ix, nn = opt.n, at = gk === 'atrium' && ix != null && nn >= 4 && (ix % 4 === 1);
+    const zp = 0.14, ns = Math.max(1, Math.min(5, Math.round((hF - 0.36) / 0.9))), sh = (hF - zp - 0.16) / ns, zt = zp + ns * sh;
+    const gfm = opt.fgf || 'win', gf = ix == null ? 'win' : gfm === 'door' ? (ix % 2 === 0 ? 'door' : 'blank') : gfm === 'turn' ? 'turn' : gfm === 'mix' ? (ix % 2 === 0 ? 'door' : 'turn') : 'win';
+    const ops3 = [[0.06, 0.31], [0.375, 0.625], [0.69, 0.94]], NB = 4;
+    S3(0, zp, STD, 0, 1, DP.mf - 0.05, 1); S3(zp, zt, INT, 0, 1, RV - 0.1, 1);   // dark plinth and the interior seen through the glass
+    for (let s = 0; s < ns; s++) {
+      const gm = s === 0 ? gf : 'win', z0 = zp + s * sh, z1 = z0 + sh, sp = 0.15;
+      if (gm === 'blank') { S3(z0, z1, SPN, 0, 1, DP.gf - 0.05, RV); S3(z0 + 0.1, z1 - 0.1, mix(SPN, 0.85), 0.12, 0.88, DP.gf - 0.1, RV); }
+      else if (gm === 'door') {   // glazed bays either side of a sliding-door portal under a flat canopy
+        S3(z0, z1 - sp, GLC, 0.02, 0.98, DP.gf, DP.gf + 0.12); S3(z1 - sp, z1, SPN, 0, 1, DP.gf - 0.03, RV);
+        S3(z0 + 0.02, z1 - sp - 0.04, INT, 0.28, 0.72, DP.gf - 0.1, RV); S3(z0 + 0.02, z1 - sp - 0.1, '#bcd6e4', 0.3, 0.49, DP.gf - 0.12, DP.gf - 0.05); S3(z0 + 0.02, z1 - sp - 0.1, '#bcd6e4', 0.51, 0.7, DP.gf - 0.12, DP.gf - 0.05);
+        S3(z1 - sp - 0.04, z1 - sp - 0.015, STL, 0.27, 0.73, DP.gf - 0.2, RV); S3(z0, z0 + 0.025, STL, 0.24, 0.76, DP.mf - 0.5, RV);
+        S3(z1 - sp, z1 - sp + 0.06, STL, 0.12, 0.88, DP.mf - 1.1, RV);   // entrance canopy
+      } else if (gm === 'turn') {
+        S3(z0, z1 - sp, GLC, 0.02, 0.98, DP.gf, DP.gf + 0.1); S3(z1 - sp, z1, SPN, 0, 1, DP.gf - 0.03, RV);
+        ops3.forEach(function (op) { const m = (op[0] + op[1]) / 2, ph = (z1 - sp - z0) * 0.5; S3(z0 + 0.02, z0 + 0.05, '#9aa0a6', op[0] + 0.02, op[1] - 0.02, DP.gf - 0.3, DP.gf - 0.05); S3(z0 + 0.04, z0 + 0.04 + ph, '#b4bac0', m - 0.012, m + 0.012, DP.gf - 0.34, DP.gf - 0.2); for (let t = 0; t < 3; t++) S3(z0 + 0.04 + ph * (0.55 + t * 0.15), z0 + 0.052 + ph * (0.55 + t * 0.15), '#7d848b', m - 0.06, m + 0.06, DP.gf - 0.36, DP.gf - 0.22); S3(z1 - sp - 0.03, z1 - sp, '#f1c40f', op[0], op[1], DP.gf - 0.12, RV); });
+      } else if (wk === 'curtain') {
+        S3(z0, z1 - sp, GLC, 0.02, 0.98, DP.gf, DP.gf + 0.12); S3(z1 - sp, z1, SPN, 0, 1, DP.gf - 0.03, RV);   // full-height vision glass with an opaque spandrel at each floor
+        S3(z0 + 0.05, z1 - sp - 0.04, mix(GLC, 1.15), 0.1, 0.34, DP.gf - 0.04, DP.gf + 0.02);   // a reflection streak
+      } else if (wk === 'ribbon') {
+        S3(z0, z0 + 0.3 * sh, SPN, 0, 1, DP.gf - 0.03, RV); S3(z0 + 0.3 * sh, z0 + 0.78 * sh, GLC, 0.02, 0.98, DP.gf, DP.gf + 0.12); S3(z0 + 0.78 * sh, z1, SPN, 0, 1, DP.gf - 0.03, RV);
+      } else {   // louvres: glass behind horizontal brise-soleil blades
+        S3(z0, z1, mix(base, 0.62), 0.02, 0.98, DP.gf + 0.1, DP.gf + 0.22);
+        for (let b = 0; b < 6; b++) { const bz = z0 + (b + 0.5) * sh / 6; S3(bz, bz + 0.012, '#7d878f', 0.02, 0.98, DP.mf - 0.12, DP.gf + 0.02); }
+      }
+      S3(z1 - 0.015, z1 + 0.015, STL, 0, 1, DP.mf, RV);   // floor-line transom
+    }
+    const mfd = wk === 'louvre' ? DP.mf - 0.45 : DP.mf;
+    for (let k = 0; k <= NB; k++) { const x = k / NB, w = k === 0 || k === NB ? 0.016 : 0.014; S3(zp, zt, STL, Math.max(0, x - w), Math.min(1, x + w), dep === 2 ? DP.mf : mfd, RV); }   // frame mullions, deep blades when the relief is deep
+    S3(zt, hF + 0.05, SPN, 0, 1, DP.cf * 0.4 + 0.05, RV); S3(hF + 0.05, hF + 0.09, STL, 0, 1, DP.cf * 0.4, RV);
+    if (gk === 'canopy') { S3(zt - 0.03, zt + 0.035, STL, 0, 1, DP.cf - 1.4, RV); S3(zt - 0.045, zt - 0.03, mix(STD, 0.8), 0, 1, DP.cf - 1.3, RV); }   // a slim projecting roof with a dark soffit
+    if (at) {   // a glazed atrium bay standing out from the wall and rising above the roof
+      const TF = -1.5 - dep * 0.3; S3(zp, hF + 0.5, mix(base, 1.3), 0.12, 0.88, TF, TF + 0.3);
+      for (let k = 0; k <= 4; k++) { const x = 0.12 + 0.76 * k / 4; S3(zp, hF + 0.5, STL, x - 0.012, x + 0.012, TF - 0.06, TF + 0.3); }
+      for (let s = 1; s <= ns + 1; s++) S3(zp + s * sh - 0.015, zp + s * sh + 0.015, STL, 0.12, 0.88, TF - 0.06, TF + 0.3);
+      S3(hF + 0.5, hF + 0.58, STD, 0.1, 0.9, TF - 0.15, RV);
+    }
   }
   else if (style === 'glass') {   // curtain wall: spandrels, steel mullions, transoms and alternating tints
     const base = wc0 || '#6f8fa6', n = 6;
@@ -3133,7 +3464,7 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
     for (let i = 0; i <= 4; i++) S3(0.1, hF - 0.05, '#566069', i / 4 - 0.008, i / 4 + 0.008, 0, 0.9);
     S3(hF - 0.05, hF + 0.07, fc0 || STEEL, 0, 1, 0, 1);
   }
-  else if (style === 'cladding' || style === 'fins' || style === 'tudor' || style === 'ribbon' || style === 'frame' || style === 'precast' || style === 'brick2') {
+  else if (style === 'cladding' || style === 'fins' || style === 'ribbon' || style === 'frame' || style === 'precast' || style === 'brick2') {
     const fc = opt.fc, wc = opt.wc;
     const S2 = function (z0, z1, c, a, b, f0, f1) {   // lateral a..b of the cell, depth f0..f1 into the wall (0 = outer face)
       let q;
@@ -3153,18 +3484,6 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
       S2(0, hF, mix(base, 1.2), 0, 1, 0.4, 1); S2(0, 0.1, '#16181b', 0, 1, 0.2, 1);
       for (let i = 0; i < n; i++) { const c = (i + 0.5) / n, w = 0.15 / n; S2(0.1, hF - 0.04, '#121417', c - w, c + w, 0, 0.32); S2(0.1, hF - 0.04, '#3a3f45', c + w, c + w * 1.3, 0, 0.32); }
       S2(hF - 0.04, hF + 0.06, fc || '#e8e8e4', 0, 1, 0, 1);
-    } else if (style === 'tudor') {   // brick plinth, white render and a black timber frame with braces
-      const wall = wc || '#ebe8de', BLK = '#17120e', n = 6, z0 = 0.16, h = hF - z0;
-      S2(0, z0, '#8a3f2f', 0, 1, 0, 1); out[out.length - 1][12] = 'b'; S2(z0 - 0.02, z0 + 0.02, '#c9b49a', 0, 1, 0, 1);
-      S2(z0 + 0.02, hF, wall, 0, 1, 0.3, 1);
-      for (let i = 0; i <= n; i++) { const c = i / n, w = 0.03; S2(z0, hF, BLK, Math.max(0, c - w), Math.min(1, c + w), 0, 0.5); }
-      [0, 0.5, 1].forEach(function (f) { const zz = z0 + h * f; S2(Math.max(z0, zz - 0.035), Math.min(hF, zz + 0.035), BLK, 0, 1, 0, 0.5); });
-      for (let i = 0; i < n; i++) {   // diagonal braces in the upper panels, drawn as short steps
-        const a = i / n, b = (i + 1) / n, up = i % 2 === 0, NS = 7;
-        for (let k = 0; k < NS; k++) { const t0 = k / NS, t1 = (k + 1) / NS, ax = up ? a + (b - a) * t0 : b - (b - a) * t1, bx2 = ax + (b - a) / NS; S2(z0 + h * (0.5 + 0.5 * t0), z0 + h * (0.5 + 0.5 * t1) + 0.01, BLK, ax - 0.004, bx2 + 0.012, 0, 0.5); }
-        
-      }
-      S2(hF, hF + 0.06, fc || BLK, 0, 1, 0, 1);
     } else if (style === 'ribbon') {   // 1970s concrete: floor slabs, recessed ribbon windows with slim mullions
       const base = wc || '#b9bcc0', F = [[0.12, 0.28], [0.4, 0.56], [0.68, 0.84]], DKG = '#202c35';
       S2(0, hF, base, 0, 1, 0.1, 1); S2(0, 0.1, mix(base, 0.6), 0, 1, 0, 1);
@@ -3247,15 +3566,6 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
       add(hF, hF + 0.06, Wd);
     }
   }
-  else if (style === 'modern') {   // coloured cladding panels, a long ribbon window and a slim canopy edge
-    const A = mix(seatHex, 0.9), L = '#e9ecee', DK = '#1d2833';
-    if (!big) { add(0, hF, L); add(hF * 0.3, hF * 0.62, DK); add(hF, hF + 0.06, A); }
-    else {
-      const n = 5; for (let i = 0; i < n; i++) add(0, hF, i % 2 ? L : A, seg(i / n, (i + 1) / n));
-      add(hF * 0.34, hF * 0.58, DK); add(hF * 0.34, hF * 0.37, '#9fb3c2'); add(hF * 0.55, hF * 0.58, '#9fb3c2');
-      add(hF * 0.9, hF, '#2b323a'); add(hF, hF + 0.08, '#14181c');
-    }
-  }
   else if (style === 'louvre') {   // vertical metal louvres over a dark ventilated wall
     const n = big ? 16 : 4; add(0, hF, '#1f262d');
     for (let i = 0; i < n; i++) add(0.05, hF - 0.05, i % 2 ? '#7d8791' : '#b7bfc6', seg((i + 0.1) / n, (i + 0.9) / n));
@@ -3292,7 +3602,7 @@ function facadeBoxes(style, r, hF, seatHex, tower, big, o, opt) {
 
 
 /* ---------- architectural detail on the back of the side stands ---------- */
-function wallCol(style) { return { buttress: '#bab7ad', arcade: '#d9c7a3', colonnade: '#e4e0d6', deco: '#ddd6c6', modern: '#e9ecee', louvre: '#7d8791', timberglass: '#a9743f', cladding: '#c3c9cf', fins: '#2a2e33', tudor: '#ebe8de', ribbon: '#b9bcc0', frame: '#a9503a', precast: '#c9cbc7', brick: '#9a4a35', towers: '#c9a77a', ribbed: '#c3c9cf', banded: '#e6e9ec', concrete: '#b4b8bd', glass: '#5f7280', glazed: '#8db2c6', steel: '#8c959d', club: '#c8453a' }[style] || '#b4b8bd'; }
+function wallCol(style) { return { buttress: '#bab7ad', arcade: '#d9c7a3', colonnade: '#e4e0d6', deco: '#ddd6c6', louvre: '#7d8791', timberglass: '#a9743f', cladding: '#c3c9cf', fins: '#2a2e33', ribbon: '#b9bcc0', frame: '#a9503a', precast: '#c9cbc7', brick: '#9a4a35', towers: '#c9a77a', ribbed: '#c3c9cf', banded: '#e6e9ec', concrete: '#b4b8bd', glass: '#5f7280', glazed: '#8db2c6', steel: '#8c959d', club: '#c8453a', etfe: '#9aa3b8', greenwall: '#3d7f35', timber: '#a87a48', gabion: '#8f8a80', mill: '#7a3e2e', perf: '#b49a6a', mosaic: '#2b57c4', brickpier: '#a1503a' }[style] || '#b4b8bd'; }
 // a slice of the back wall: a..b along the stand, f0..f1 from the outer face (0) inwards (1) of the wall thickness
 function bandSub(o, a, b, f0, f1, wt) {
   const T = FT * (wt || 1);
@@ -3747,7 +4057,7 @@ function storeyFacade(style, rr, H, seat, d, fo) {   // an office block is sever
   const GZ = 1.3, BH = 0.9, out = [];
   for (let k = 0; k <= H; k++) {   // ground storey first, so the upper walls always paint in front of the ones below
     const hs = k === 0 ? GZ : BH, dz = k === 0 ? 0 : GZ + (k - 1) * BH;
-    facadeBoxes(style, rr, hs, seat, false, true, d, fo).forEach(function (b) {
+    facadeBoxes(style, rr, hs, seat, false, true, d, Object.assign({}, fo, { sk: k })).forEach(function (b) {   // sk: which storey this is, so the newer facades only put a ground band on the ground storey
       if (k > 0 && b[5] <= 0.17) return;   // only the ground storey has a plinth
       if (k < H && b[4] >= hs - 0.002) return;   // copings above the storey line belong to the roof only; clipping them stops each storey overlapping the next, which tangles the painter's order
       const a = b.slice(); if (k < H && a[5] > hs) a[5] = hs; a[4] += dz; a[5] += dz; if (a.length > 11 && a[11]) a[11] = a[11].map(function (v) { return v + dz; });
@@ -3757,7 +4067,7 @@ function storeyFacade(style, rr, H, seat, d, fo) {   // an office block is sever
   return out;
 }
 function officeItems(m, ck, p, cd, items, ext, csigns) {   // a corner office: either an exec-box block (corporate boxes on a 45 degree stepped corner facing the pitch) or a plain block with an LED scoreboard on its roof
-  const dm = officeDims(p), Wx = dm[0], Dy = dm[1], plain = p.feat !== 'office', led = p.feat === 'office2', H = Math.max(1, p.height | 0), hF = 1.3 + H * 0.9, sx = cd.sx, sy = cd.sy, seat = CBY[p.col] || '#c0392b', wc = wallBase(p, seat), fs = p.facade === 'none' ? 'modern' : p.facade;
+  const dm = officeDims(p), Wx = dm[0], Dy = dm[1], plain = p.feat !== 'office', led = p.feat === 'office2', H = Math.max(1, p.height | 0), hF = 1.3 + H * 0.9, sx = cd.sx, sy = cd.sy, seat = CBY[p.col] || '#c0392b', wc = wallBase(p, seat), fs = p.facade === 'none' ? 'cladding' : p.facade;
   const x0 = (sx > 0 ? PX + PW + 1 : PX - 1 - Wx) + sx * ext[0], y0 = (sy > 0 ? PY + PL + 1 : PY - 1 - Dy) + sy * ext[1], ROOFC = p.ocol && p.ocol !== 'auto' && CBY[p.ocol] ? [mix(CBY[p.ocol], 1.1), CBY[p.ocol], mix(CBY[p.ocol], 0.72)] : ['#9aa0a6', '#80868c', '#686e74'];
   const LEDGE = ['#d6dadd', '#b1b7bc', '#90969d'], MUL = ['#3a4046', '#2d3237', '#22272b'], B = corner2w(sx, sy), c = led ? Math.min(p.bsz === 'small' ? 1 : 2, Math.min(Wx, Dy)) : plain ? 0 : Math.min(3, Math.max(1, Math.min(Wx, Dy) - 1));
   const pres = function (i, j) { return i >= 0 && j >= 0 && i < Wx && j < Dy && i + j >= c - 1; };
@@ -3895,7 +4205,7 @@ function officeItems(m, ck, p, cd, items, ext, csigns) {   // a corner office: e
     });
     const bk = bmap[i + ',' + j]; if (bk) { bk.forEach(function (q) { boxes.push(q); }); delete bmap[i + ',' + j]; }
     const roofTop = [], bodyB = [], facB = []; boxes.forEach(function (q, qi) { (q[4] >= hF + 0.069 ? roofTop : bodyB).push(q); });   // the roof furniture (parapets, plant, lift core) is its own sprite drawn after the body, so the painter's order inside a very busy cell can never put the roof under the wall
-    bodyB.exact = roofTop.exact = (fs === 'steel' || fs === 'tudor') ? 1 : 2;   // office cells use the exact screen-overlap ordering
+    bodyB.exact = roofTop.exact = fs === 'steel' ? 1 : 2;   // office cells use the exact screen-overlap ordering
     items.push({ gx: cx, gy: cy, st: ck, sec: 0, desc: bodyB }); n++;
     if (roofTop.length) items.push({ gx: cx, gy: cy, st: ck, sec: 0, desc: roofTop });
   }
@@ -3908,10 +4218,10 @@ function officeItems(m, ck, p, cd, items, ext, csigns) {   // a corner office: e
 }
 /* ---------- geometry of the four sides ---------- */
 const GEO = {
-  N: { o: [0, -1], len: PW, per: PW / NSEC, ad: function (i) { return [PX + i, PY - 1]; }, row: function (i, d) { return [PX + i, PY - 2 - d]; } },
-  S: { o: [0, 1], len: PW, per: PW / NSEC, ad: function (i) { return [PX + i, PY + PL]; }, row: function (i, d) { return [PX + i, PY + PL + 1 + d]; } },
-  W: { o: [-1, 0], len: PL, per: PL / NSEC, ad: function (j) { return [PX - 1, PY + j]; }, row: function (j, d) { return [PX - 2 - d, PY + j]; } },
-  E: { o: [1, 0], len: PL, per: PL / NSEC, ad: function (j) { return [PX + PW, PY + j]; }, row: function (j, d) { return [PX + PW + 1 + d, PY + j]; } }
+  N: { o: [0, -1], get len() { return PW; }, get per() { return PW / NSEC; }, ad: function (i) { return [PX + i, PY - 1]; }, row: function (i, d) { return [PX + i, PY - 2 - d]; } },
+  S: { o: [0, 1], get len() { return PW; }, get per() { return PW / NSEC; }, ad: function (i) { return [PX + i, PY + PL]; }, row: function (i, d) { return [PX + i, PY + PL + 1 + d]; } },
+  W: { o: [-1, 0], get len() { return PL; }, get per() { return PL / NSEC; }, ad: function (j) { return [PX - 1, PY + j]; }, row: function (j, d) { return [PX - 2 - d, PY + j]; } },
+  E: { o: [1, 0], get len() { return PL; }, get per() { return PL / NSEC; }, ad: function (j) { return [PX + PW, PY + j]; }, row: function (j, d) { return [PX + PW + 1 + d, PY + j]; } }
 };
 /* Side stands can be lengthened (ext cells at each end) once both corner blocks at their ends are gone.
    Where two lengthened stands meet they share a diagonal mitre: the end stands (N/S) win the tie. */
@@ -4012,6 +4322,8 @@ function lineH(pr, k) {
   return same ? nxt : top;
 }
 let SIDE_COL = null;   // per-stand colour of the flanks, end walls and end panels (null = natural concrete)
+const SIDETONE = { brick: '#9a4a35', towers: '#a9503a', deco: '#ddd6c6', etfe: '#9aa3b8', greenwall: '#3d7f35', timber: '#a87a48', gabion: '#8f8a80', mill: '#7a3e2e', perf: '#b49a6a', mosaic: '#2b57c4', brickpier: '#a1503a' };
+const sideTone = function (p) { if (p.facade === 'buttress') return p.wcol && p.wcol !== 'auto' ? CBY[p.wcol] : '#bab7ad'; const t = SIDETONE[p.facade]; return t ? (p.wcol && p.wcol !== 'auto' && CBY[p.wcol] ? CBY[p.wcol] : t) : null; };   // the flanks, end walls and end panels carry the facade's own material
 const sideF = function (f) { return SIDE_COL ? [mix(SIDE_COL, f[0]), mix(SIDE_COL, f[1]), mix(SIDE_COL, f[2])] : null; };
 function endPlates(o, r, k, pr, lo, hi) {
   const rc = rowRect(o, r, r), lx = o[1] !== 0, fh = o[1] < 0 || (o[1] === 0 && o[0] < 0), out = [];
@@ -4273,13 +4585,28 @@ function shellItems(m, items, topH, signs, shq) {
         (BLM[ci + ',' + cj] = BLM[ci + ',' + cj] || []).push(bx(u0, v0, u1, v1, z0, z1, col, 1)); BLN[ci + ',' + cj] = curN;
       }
     };
-    const IN = 0.03, base = BLS === 'brick' ? '#8e4636' : BLS === 'glass' ? '#39434b' : BLS === 'stone' || BLS === 'empire' ? mix(sc, 0.9) : mix(sc, 0.92), zc = T - 0.12, zp = 0.3;
+    const BLBASE = { towers: '#a9503a', concrete: '#b4b8bd', deco: '#e8dfc8', etfe: mix(sc, 1.2), greenwall: '#3d6b2e', timber: '#a87a48', gabion: '#8f8a80', mill: '#7a3e2e', perf: '#b49a6a', mosaic: mix(sc, 0.9) };
+    const IN = 0.03, base = BLBASE[BLS] ? BLBASE[BLS] : BLS === 'brick' ? '#8e4636' : BLS === 'glass' ? '#39434b' : BLS === 'stone' || BLS === 'empire' ? mix(sc, 0.9) : mix(sc, 0.92), zc = T - 0.12, zp = 0.3;
     const hh = function (i, j) { return (((i * 73856093) ^ (j * 19349663) ^ (idx * 83492791)) >>> 0) % 100 / 100; };
+    const TT = ['#b98a55', '#a87a48', '#c49a64', '#9a6c3f', '#b28450'], GG = ['#2f6b2e', '#3d7f35', '#4f9440', '#27582a', '#5aa04a', '#6a8f3a'], SS = ['#8f8a80', '#a39d90', '#7b776f', '#b2a995', '#6f6c66', '#9a9486'];
+    const BLG = {   // the block takes on any of the facade styles: course height, tile width, and the colour of each tile
+      towers: { ch: 0.2, tw: 0.25, f: function (u, z, r, b) { return r % 5 === 0 ? '#e4d6b6' : mix('#a9503a', 0.85 + 0.3 * hh(r, b)); } },
+      concrete: { ch: 0.25, tw: 0.5, f: function (u, z, r, b) { return r % 4 === 3 ? mix('#b4b8bd', 0.82) : mix('#b4b8bd', 0.93 + 0.14 * hh(r, b)); } },
+      deco: { ch: 0.25, tw: 0.2, f: function (u, z, r, b) { return r % 6 === 5 ? '#d4a93a' : b % 3 === 1 ? '#20383a' : mix('#e8dfc8', b % 3 ? 0.92 : 1.06); } },
+      etfe: { ch: 0.3, tw: 0.3, f: function (u, z, r, b) { return mix(sc, 1.3 + 0.35 * hh(r + (b % 2) * 3, b)); } },
+      greenwall: { ch: 0.2, tw: 0.2, f: function (u, z, r, b) { return hh(r, b) > 0.9 ? (hh(b, r) > 0.5 ? '#e8d34a' : '#e07aa0') : mix(GG[Math.floor(hh(r + 5, b) * GG.length)], 0.85 + 0.3 * hh(b, 3)); } },
+      timber: { ch: 0.6, tw: 0.2, f: function (u, z, r, b) { return mix(TT[Math.floor(hh(0, b) * TT.length)], 0.92 + 0.14 * hh(r, b)); } },
+      gabion: { ch: 0.2, tw: 0.3, f: function (u, z, r, b) { return mix(SS[Math.floor(hh(r, b) * SS.length)], 1.0 + 0.25 * hh(b, r)); } },
+      mill: { ch: 0.2, tw: 0.25, f: function (u, z, r, b) { return r % 4 === 1 && b % 2 === 0 ? '#8fb0c0' : r % 4 === 2 && b % 2 === 0 ? '#1a1d20' : mix('#7a3e2e', 0.82 + 0.34 * hh(r, b)); } },
+      perf: { ch: 0.3, tw: 0.3, f: function (u, z, r, b) { return (r + b) % 3 === 0 ? mix(sc, 1.35) : hh(r, b) > 0.8 ? '#2c343a' : '#b8a37a'; } },
+      mosaic: { ch: 0.2, tw: 0.2, f: function (u, z, r, b) { const v = ((b + r * 2) % 16 + 16) % 16, k = v < 6 ? sc : v < 8 ? mix(sc, 1.55) : v < 9 ? '#e6c41d' : v < 13 ? mix(sc, 0.62) : '#e9ecee'; return mix(k, 0.92 + 0.16 * hh(r, b)); } }
+    }, G = BLG[BLS];
     if (rot) {   // turned to follow the facade round a corner: built from fine 1/16 squares in a rotated rectangle, in the same facade styles
       const tx = -ny, ty = nx, ox = -nx, oy = -ny, inR = function (px, py) { const u = (px - cx) * tx + (py - cy) * ty, v = (px - cx) * ox + (py - cy) * oy; return Math.abs(u) <= BLW / 2 && Math.abs(v) <= BLD / 2; };
       const uOf = function (px, py) { return (px - cx) * tx + (py - cy) * ty + BLW / 2; };
       const zbn = T - 0.4, fr = function (v) { return v - Math.floor(v); };
       const colAt = function (u, z, row, ix, iy) {
+        if (G) return G.f(u, z, Math.floor((z - zp) / G.ch), Math.floor(u / G.tw));
         if (BLS === 'brick') { const bi = Math.floor((u + (row % 2) * 0.125) / 0.25); return mix('#a5513c', 0.82 + 0.34 * hh(row, bi)); }
         if (BLS === 'stone') { const r2 = Math.floor((z - zp) / 0.3), bi = Math.floor((u + (r2 % 2) * 0.25) / 0.5); return mix(sc, 0.9 + 0.22 * hh(r2, bi)); }
         if (BLS === 'glass') { const fu = fr(u / 0.5), fz = fr((z - zp) / 0.4); return fu < 0.06 || fu > 0.94 || fz > 0.9 ? '#39434b' : mix('#6f9ab0', 0.85 + 0.35 * hh(Math.floor((z - zp) / 0.4), Math.floor(u / 0.5))); }
@@ -4308,6 +4635,7 @@ function shellItems(m, items, topH, signs, shq) {
       else if (BLS === 'brick') { for (let z = zp, r = 0; z < zc - 0.001; z += rh0, r++) { const off = r % 2 ? 0.125 : 0; for (let u = a0 - off, b = 0; u < a1; u += 0.25, b++) P(u + 0.01, u + 0.25 - 0.01, z, Math.min(z + rh0 - 0.012, zc), mix('#a5513c', 0.82 + 0.34 * hh(r, b + fi * 7))); } }
       else if (BLS === 'stone') { for (let z = zp, r = 0; z < zc - 0.001; z += 0.3, r++) { const off = r % 2 ? 0.25 : 0; for (let u = a0 - off, b = 0; u < a1; u += 0.5, b++) P(u + 0.012, u + 0.5 - 0.012, z, Math.min(z + 0.3 - 0.014, zc), mix(sc, 0.9 + 0.22 * hh(r, b + fi * 5))); } }
       else if (BLS === 'glass') { for (let z = zp + 0.04, r = 0; z < zc - 0.1; z += 0.4, r++) for (let u = a0, b = 0; u < a1 - 0.01; u += 0.5, b++) P(u + 0.03, u + 0.5 - 0.03, z, Math.min(z + 0.36, zc - 0.04), mix('#6f9ab0', 0.85 + 0.35 * hh(r, b + fi * 3))); }
+      else if (G) { for (let z = zp, r = 0; z < zc - 0.001; z += G.ch, r++) for (let u = a0, b = 0; u < a1 - 0.004; u += G.tw, b++) P(u + 0.004, u + G.tw - 0.004, z, Math.min(z + G.ch - 0.005, zc), G.f(u, z, r, b + fi * 5)); }
       else if (BLS === 'empire') {
         const zb = zc - 0.4;
         for (let z = zp, r = 0; z < zb - 0.001; z += 0.2, r++) P(a0, a1, z, Math.min(z + 0.2, zb), mix(sc, r % 2 ? 0.96 : 1.04));
@@ -5078,7 +5406,7 @@ function cornerOutline(shape, R) {
 }
 function genItems(m) {
   if (m.shell && m.shell !== 'none') { m = JSON.parse(JSON.stringify(m)); ALL_KEYS.forEach(function (k) { if (m.st[k]) { m.st[k].roof = 'none'; } }); }
-  setGrid(m.n);
+  setGround(m);
   const items = [], occ = {}, annex = [], shadowQuads = [], signs = [];
   let cap = 0, cost = 0;
   const parts = {}, mk = { k: null, c: 0, t: 0 };   // capacity and cost attributed to each stand, for the breakdown panel
@@ -5091,7 +5419,7 @@ function genItems(m) {
     const p = m.st[key], g = GEO[key], pr = prof[key], rp = pr.roof, o = g.o;
     if (!p.on) return;
     if (p.uc) { constructionSite(m, key, g, pr, items, signs, occ); return; }
-    SIDE_COL = p.scol !== 'auto' ? CBY[p.scol] : (p.facade === 'buttress' ? (p.wcol && p.wcol !== 'auto' ? CBY[p.wcol] : '#bab7ad') : null);   // raking-pier stands: the flanks are the same concrete as the piers
+    SIDE_COL = p.scol !== 'auto' ? CBY[p.scol] : sideTone(p);   // raking-pier stands: the flanks are the same concrete as the piers
     const PLC = p.roof === 'shed' && p.plate === 'on' && rp ? plateGeo(p, rp, g.len, m, o) : null;
     const hF = pr.h[pr.K - 1] + 0.3, hasFac = p.facade !== 'none', acc = CBY[p.acol], capK = capRow(pr);
     const ee = extEnds(m, key), e0 = ee[0], e1 = ee[1], ends = EXT_ENDS[key];
@@ -5491,7 +5819,7 @@ function genItems(m) {
     flush(ck);
     const cd = CORNERS[ck], p = m.st[ck], sx = cd.sx, sy = cd.sy;
     if (!p.on || p.secs[0].f === 'gap') return;
-    SIDE_COL = p.scol !== 'auto' ? CBY[p.scol] : (p.facade === 'buttress' ? (p.wcol && p.wcol !== 'auto' ? CBY[p.wcol] : '#bab7ad') : null);   // raking-pier stands: the flanks are the same concrete as the piers
+    SIDE_COL = p.scol !== 'auto' ? CBY[p.scol] : sideTone(p);   // raking-pier stands: the flanks are the same concrete as the piers
     const pr = prof[ck], rp = pr.roof, D = pr.cells, K = pr.K, sec = p.secs[0], seat = CBY[sec.c || p.col], acc = CBY[p.acol];
     const hF = pr.h[K - 1] + 0.3, hasFac = p.facade !== 'none', capK = capRow(pr);
     const bxRows = bxList(sec, pr);
@@ -5779,7 +6107,7 @@ function genItems(m) {
 
 /* ---------- clean up a model from outside (load, import) ---------- */
 function sanitize(o) {
-  const m = newModel(); m.n = setGrid(o && o.n);
+  const m = newModel(); m.pitW = o && o.pitW ? Math.max(8, Math.min(16, Math.round(+o.pitW / 2) * 2 || 8)) : 8; m.pitL = o && o.pitL ? Math.max(12, Math.min(24, Math.round(+o.pitL / 2) * 2 || 12)) : 12; m.cam = CAMS.some(function (c) { return o && c[0] === o.cam; }) ? o.cam : 'std'; setPitch(m.pitW, m.pitL); m.n = setGrid(o && o.n);   // grounds saved before the pitch could change keep the old 8 x 12
   ['name', 'team', 'town'].forEach(function (k) { m[k] = o && typeof o[k] === 'string' ? o[k].replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40) : ''; });
   if (!o || !o.st) throw new Error('bad');
   const num = function (v, r, d) { v = Math.round(+v); return isFinite(v) ? Math.max(r[0], Math.min(r[1], v)) : d; };
@@ -5793,14 +6121,14 @@ function sanitize(o) {
     if (!s) return;
     const t = m.st[k];
     t.on = s.on !== false; t.uc = !isCorner(k) && s.uc === true; t.ads = isCorner(k) ? false : s.ads !== false;
-    t.crest = sanitizeCrest(s.crest); t.crestsh = s.crestsh === 'round' ? 'round' : 'square'; t.crestc = CBY[s.crestc] ? s.crestc : 'auto'; t.xcol = CBY[s.xcol] ? s.xcol : 'auto'; t.ucol = CBY[s.ucol] ? s.ucol : 'auto'; t.ccol = CBY[s.ccol] ? s.ccol : 'auto'; t.plate = s.plate === 'on' ? 'on' : 'off'; t.cex = s.cex === 'on' || s.cex === 'off' ? s.cex : 'auto'; t.cey = s.cey === 'on' || s.cey === 'off' ? s.cey : 'auto'; t.cshape = s.cshape === 'angled' || s.cshape === 'facet' ? s.cshape : 'round'; t.rfc = CBY[s.rfc] ? s.rfc : 'auto'; t.ocol = CBY[s.ocol] ? s.ocol : 'auto'; t.lat = s.lat === true; t.lat2 = s.lat2 === true; t.lcol = CBY[s.lcol] ? s.lcol : 'auto'; t.lcol2 = CBY[s.lcol2] ? s.lcol2 : 'auto'; t.pcol = CBY[s.pcol] ? s.pcol : 'auto'; t.bcol = CBY[s.bcol] ? s.bcol : 'auto'; t.fl = s.fl !== false; t.flx = Math.max(-10, Math.min(10, Math.round(+s.flx || 0))); t.fly = Math.max(-10, Math.min(10, Math.round(+s.fly || 0))); t.feat = inList(CFEATS, s.feat, 'none'); t.gantry = false; t.osz = inList(OSIZES, s.osz, s.depth >= 4 ? '4x4' : s.depth <= 2 ? '2x2' : '3x3'); t.oturn = !!s.oturn; t.bsz = inList(BSIZES, s.bsz, 'large'); t.bz = inList(BZS, s.bz, 'mid'); t.rlen = s.rlen === 'long' ? 'long' : 'short'; t.rlights = isCorner(k) ? 'none' : inList(ROOFLIGHTS, s.rlights, 'none'); t.crowd = inList(CROWDS, s.crowd, 'none'); if (s.facade === 'brick' && s.gfloor === 'turn' && (s.fgf == null || s.fgf === 'mix')) t.fgf = 'turn'; t.gfloor = 'none';   // the separate ground-floor option is gone: entrances and turnstiles belong to each facade   // turnstiles now belong to the brick facade itself t.outer = inList(OUTERS, s.outer, 'none'); t.ow = Math.max(-10, Math.min(10, s.ow | 0)); t.od = Math.max(-10, Math.min(10, s.od | 0)); t.ew = Math.max(-10, Math.min(10, s.ew | 0)); t.ed = Math.max(-10, Math.min(10, s.ed | 0)); { const fl = outFl(s); t.ob = fl.ob; t.os = fl.os; t.ot = fl.ot; t.oe = fl.oe; t.oc = fl.oc; t.of = fl.of; t.outer = outAny(t) ? 'mixed' : 'none'; } t.sign = isCorner(k) ? 'none' : inList(SIGNS, s.sign, 'none'); t.fcol = CBY[s.fcol] ? s.fcol : 'auto'; t.wcol = CBY[s.wcol] ? s.wcol : 'auto'; t.scol = CBY[s.scol] ? s.scol : 'auto'; t.gantry = s.gantry === true; t.endcap = inList(ENDCAPS, s.endcap, 'none'); t.ecl = Math.max(-10, Math.min(10, s.ecl | 0)); t.ecs = inList(ENDSHAPES, { cvdown: 'down', swdown: 'down', curvedown: 'down', up: 'down', cvup: 'down', cxup: 'cxdown', swup: 'down', bgdown: 'cxdown', bgup: 'cxdown', curveup: 'down' }[s.ecs] || s.ecs, 'flat'); t.rdis = typeof s.rdis === 'string' ? s.rdis.replace(/[^0-8]/g, '').slice(0, 9) : ''; t.tdis = typeof s.tdis === 'string' ? s.tdis.replace(/[^01]/g, '').slice(0, 64) : ''; t.fdis = typeof s.fdis === 'string' ? s.fdis.replace(/[^0-8]/g, '').slice(0, 9) : ''; t.fpo = Math.max(0, Math.min(10, s.fpo | 0)); t.plof = Math.max(-10, Math.min(10, s.plof | 0)); t.arch = inList(ARCHS, s.arch, 'mixed'); t.fdep = inList(BRDEPS, s.fdep, 'low'); t.fwin = inList(BRWINS, s.fwin, 'sash'); t.fgab = inList(BRGABS, s.fgab, 'none'); t.fgf = inList(BRGFS, s.fgf, 'mix');
+    t.crest = sanitizeCrest(s.crest); t.crestsh = s.crestsh === 'round' ? 'round' : 'square'; t.crestc = CBY[s.crestc] ? s.crestc : 'auto'; t.xcol = CBY[s.xcol] ? s.xcol : 'auto'; t.ucol = CBY[s.ucol] ? s.ucol : 'auto'; t.ccol = CBY[s.ccol] ? s.ccol : 'auto'; t.plate = s.plate === 'on' ? 'on' : 'off'; t.cex = s.cex === 'on' || s.cex === 'off' ? s.cex : 'auto'; t.cey = s.cey === 'on' || s.cey === 'off' ? s.cey : 'auto'; t.cshape = s.cshape === 'angled' || s.cshape === 'facet' ? s.cshape : 'round'; t.rfc = CBY[s.rfc] ? s.rfc : 'auto'; t.ocol = CBY[s.ocol] ? s.ocol : 'auto'; t.lat = s.lat === true; t.lat2 = s.lat2 === true; t.lcol = CBY[s.lcol] ? s.lcol : 'auto'; t.lcol2 = CBY[s.lcol2] ? s.lcol2 : 'auto'; t.pcol = CBY[s.pcol] ? s.pcol : 'auto'; t.bcol = CBY[s.bcol] ? s.bcol : 'auto'; t.fl = s.fl !== false; t.flx = Math.max(-10, Math.min(10, Math.round(+s.flx || 0))); t.fly = Math.max(-10, Math.min(10, Math.round(+s.fly || 0))); t.feat = inList(CFEATS, s.feat, 'none'); t.gantry = false; t.osz = inList(OSIZES, s.osz, s.depth >= 4 ? '4x4' : s.depth <= 2 ? '2x2' : '3x3'); t.oturn = !!s.oturn; t.bsz = inList(BSIZES, s.bsz, 'large'); t.bz = inList(BZS, s.bz, 'mid'); t.rlen = s.rlen === 'long' ? 'long' : 'short'; t.rlights = isCorner(k) ? 'none' : inList(ROOFLIGHTS, s.rlights, 'none'); t.crowd = inList(CROWDS, s.crowd, 'none'); if (s.facade === 'brick' && s.gfloor === 'turn' && (s.fgf == null || s.fgf === 'mix')) t.fgf = 'turn'; t.gfloor = 'none';   // the separate ground-floor option is gone: entrances and turnstiles belong to each facade   // turnstiles now belong to the brick facade itself t.outer = inList(OUTERS, s.outer, 'none'); t.ow = Math.max(-10, Math.min(10, s.ow | 0)); t.od = Math.max(-10, Math.min(10, s.od | 0)); t.ew = Math.max(-10, Math.min(10, s.ew | 0)); t.ed = Math.max(-10, Math.min(10, s.ed | 0)); { const fl = outFl(s); t.ob = fl.ob; t.os = fl.os; t.ot = fl.ot; t.oe = fl.oe; t.oc = fl.oc; t.of = fl.of; t.outer = outAny(t) ? 'mixed' : 'none'; } t.sign = isCorner(k) ? 'none' : inList(SIGNS, s.sign, 'none'); t.fcol = CBY[s.fcol] ? s.fcol : 'auto'; t.wcol = CBY[s.wcol] ? s.wcol : 'auto'; t.scol = CBY[s.scol] ? s.scol : 'auto'; t.gantry = s.gantry === true; t.endcap = inList(ENDCAPS, s.endcap, 'none'); t.ecl = Math.max(-10, Math.min(10, s.ecl | 0)); t.ecs = inList(ENDSHAPES, { cvdown: 'down', swdown: 'down', curvedown: 'down', up: 'down', cvup: 'down', cxup: 'cxdown', swup: 'down', bgdown: 'cxdown', bgup: 'cxdown', curveup: 'down' }[s.ecs] || s.ecs, 'flat'); t.rdis = typeof s.rdis === 'string' ? s.rdis.replace(/[^0-8]/g, '').slice(0, 9) : ''; t.tdis = typeof s.tdis === 'string' ? s.tdis.replace(/[^01]/g, '').slice(0, 64) : ''; t.fdis = typeof s.fdis === 'string' ? s.fdis.replace(/[^0-8]/g, '').slice(0, 9) : ''; t.fpo = Math.max(0, Math.min(10, s.fpo | 0)); t.plof = Math.max(-10, Math.min(10, s.plof | 0)); t.arch = inList(ARCHS, s.arch, 'none'); t.fdep = inList(BRDEPS, s.fdep, 'low'); t.fwin = inList(BRWINS.concat(CNWINS, GLWINS), s.fwin, 'sash'); t.fgab = inList(BRGABS.concat(CNGABS, GLGABS, TWGABS), s.fgab, 'none'); t.fgf = inList(BRGFS, s.fgf, 'mix'); t.oes = inList(ENTSTY, s.oes, 'glass');
     t.bkx = Math.max(0, Math.min(4, s.bkx | 0)); t.stp = Math.max(0, Math.min(2, s.stp | 0));
     t.prem = s.prem ? 1 : 0; t.prow = Math.max(1, Math.min(2, s.prow | 0 || 1)); t.pov = Math.max(1, Math.min(3, s.pov | 0 || 2)); if (t.prem) t.depth = Math.min(t.depth, 5);   // premium tiers: a separate structure with its own rows and overlap
     t.posts = s.posts === undefined ? inList(ROOFS, s.roof, 'none') !== 'cantilever' && s.roof !== 'cwt' && s.roof !== 'lip' && s.roof !== 'wedge' : s.posts !== false;
     t.ext = isCorner(k) ? 0 : num(s.ext, [0, EXT_MAX], 0);
     if (o.sv >= 4) { t.tiers = num(s.tiers, LIM.tiers, 1); t.depth = num(s.depth, LIM.depth, 3); t.height = num(s.height, LIM.height, 1); }
     else { const mg = migrateTDH(s.tiers == null ? 1 : s.tiers, s.depth == null ? 3 : s.depth, s.height == null ? 2 : s.height); t.tiers = mg.tiers; t.depth = mg.depth; t.height = mg.height; }   // a stand saved under the old rules keeps its exact shape
-    t.roof = inList(ROOFS, s.roof, 'none'); t.facade = inList(FACADES, s.facade, 'none'); t.pattern = inList(PATTERNS, s.pattern, 'plain'); t.stext = String(s.stext || '').toUpperCase().replace(/[^A-Z0-9 !&'.-]/g, '').slice(0, 8); t.rtxt = String(s.rtxt || '').toUpperCase().replace(/[^A-Z0-9 !&'.-]/g, '').slice(0, 20); t.rtcol = CBY[s.rtcol] ? s.rtcol : 'white'; t.seg = inList(SEGS, s.seg, 'off'); t.segx = Math.max(-10, Math.min(10, Math.round(+s.segx || 0))); t.segc = CBY[s.segc] ? s.segc : 'white'; t.stpos = s.stpos == null ? 50 : Math.max(0, Math.min(100, Math.round(+s.stpos || 0))); t.seating = inList(SEATTYPES, s.seating, 'seats'); t.tcol = CBY[s.tcol] ? s.tcol : 'auto'; t.tbar = CBY[s.tbar] ? s.tbar : 'auto';
+    t.roof = inList(ROOFS, s.roof, 'none'); t.facade = inList(FACADES, FACMOVED[s.facade] || s.facade, 'none'); t.pattern = inList(PATTERNS, s.pattern, 'plain'); t.stext = String(s.stext || '').toUpperCase().replace(/[^A-Z0-9 !&'.-]/g, '').slice(0, 8); t.rtxt = String(s.rtxt || '').toUpperCase().replace(/[^A-Z0-9 !&'.-]/g, '').slice(0, 20); t.rtcol = CBY[s.rtcol] ? s.rtcol : 'white'; t.seg = inList(SEGS, s.seg, 'off'); t.segx = Math.max(-10, Math.min(10, Math.round(+s.segx || 0))); t.segc = CBY[s.segc] ? s.segc : 'white'; t.stpos = s.stpos == null ? 50 : Math.max(0, Math.min(100, Math.round(+s.stpos || 0))); t.seating = inList(SEATTYPES, s.seating, 'seats'); t.tcol = CBY[s.tcol] ? s.tcol : 'auto'; t.tbar = CBY[s.tbar] ? s.tbar : 'auto';
     t.col = CBY[s.col] ? s.col : 'red'; t.rcol = CBY[s.rcol] ? s.rcol : 'white'; t.acol = CBY[s.acol] ? s.acol : 'yellow';
     (s.secs || []).slice(0, t.secs.length).forEach(function (c, i) {
       t.secs[i].f = inList(FEATS, c.f, 'seats');
@@ -5810,7 +6138,7 @@ function sanitize(o) {
   });
   m.pitch = inList(PITCHES, o.pitch, 'football'); m.shade = inList(SHADES, o.shade, 'soft'); m.tod = inList(TODS, o.tod, 'day'); m.sun = inList(SUNS, o.sun, 'SW'); m.lawn = inList(LAWNS, o.lawn, 'h'); m.lawnw = inList(LAWNW, o.lawnw, 'med'); m.lstyle = o.lights === false ? 'none' : inList(LSTYLES, o.lstyle, 'lattice'); m.shell = o.shell === 'ribbon' ? 'ribbon' : 'none'; m.shellsk = ['slats', 'veil', 'bands', 'screen', 'colonnade', 'pleated', 'rings', 'blocks', 'arcade', 'curtain', 'allianz', 'pillars', 'frame', 'spurs', 'lamellae', 'facet', 'lusail', 'albayt', 'sweep', 'perforated', 'finring', 'tglass', 'empire'].indexOf(o.shellsk === 'sansiro' ? 'frame' : o.shellsk) >= 0 ? (o.shellsk === 'sansiro' ? 'frame' : o.shellsk) : 'slats'; m.shellcrest = sanitizeCrest(o.shellcrest); m.shellcrestc = CBY[o.shellcrestc] ? o.shellcrestc : 'auto'; ['shellp', 'shellg', 'shellr', 'shelle', 'shellw', 'shellcol', 'shellsl', 'shellgt'].forEach(function (k) { m[k] = o[k] === true; }); m.shellrf = ['solid', 'louvre', 'glass', 'membrane', 'petal', 'corrugated', 'panelled', 'arched', 'cushion', 'stripes', 'raked', 'fins', 'fins2', 'ridge2', 'empire'].indexOf(o.shellrf) >= 0 ? o.shellrf : 'solid';
   m.girders = []; for (let gi = 0; gi < 4; gi++) { const src = (o.girders && o.girders[gi]) || (gi === 0 && o.girder ? { on: true, ax: o.girderax, l: o.girderl, p: o.girderp, c: o.girderc } : {}), nn = function (v, lo, hi, df) { return typeof v === 'number' ? Math.max(lo, Math.min(hi, Math.round(v))) : df; }, mg = function (K, k, lo, df) { return typeof src[K] === 'number' ? nn(src[K], lo, 1000, df) : typeof src[k] === 'number' ? nn(src[k] * 10, lo, 1000, df) : df; }; m.girders.push({ on: !!src.on, ax: src.ax === 'y' ? 'y' : src.ax === 'x' ? 'x' : (gi === 1 ? 'y' : 'x'), L: mg('L', 'l', 100, 1000), P: mg('P', 'p', 0, [500, 500, 200, 800][gi]), H: mg('H', 'h', 0, 400), c: CBY[src.c] ? src.c : 'auto', ch: src.ch !== false, up: src.up !== false }); }
-  m.shellcbw = ['s', 'm', 'l'].indexOf(o.shellcbw) >= 0 ? o.shellcbw : 'm'; m.shellcbd = ['s', 'm', 'l'].indexOf(o.shellcbd) >= 0 ? o.shellcbd : 'm'; m.shellcbs = ['plain', 'brick', 'stone', 'glass', 'empire'].indexOf(o.shellcbs) >= 0 ? o.shellcbs : 'plain'; m.shellfc = CBY[o.shellfc] ? o.shellfc : 'auto'; m.shelllc = CBY[o.shelllc] ? o.shelllc : 'auto'; m.shellcrestsh = o.shellcrestsh === 'round' ? 'round' : 'square'; m.shellnt = CBY[o.shellnt] ? o.shellnt : 'auto'; m.shellcrsd = ['A', 'N', 'E', 'S', 'W'].indexOf(o.shellcrsd) >= 0 ? o.shellcrsd : 'A'; m.shellnh = ['L', 'C', 'R'].indexOf(o.shellnh) >= 0 ? o.shellnh : 'L'; m.shellnv = ['low', 'mid', 'up'].indexOf(o.shellnv) >= 0 ? o.shellnv : 'up'; m.shellsh = o.shellsh === 'angled' || o.shellsh === 'square' || o.shellsh === 'rcorner' ? o.shellsh : 'round'; m.shellnm = ['none', 'A', 'N', 'S', 'E', 'W'].indexOf(o.shellnm) >= 0 ? o.shellnm : 'none'; m.shellnc = CBY[o.shellnc] ? o.shellnc : 'auto';
+  m.shellcbw = ['s', 'm', 'l'].indexOf(o.shellcbw) >= 0 ? o.shellcbw : 'm'; m.shellcbd = ['s', 'm', 'l'].indexOf(o.shellcbd) >= 0 ? o.shellcbd : 'm'; m.shellcbs = ['plain', 'brick', 'stone', 'glass', 'empire', 'towers', 'concrete', 'deco', 'etfe', 'greenwall', 'timber', 'gabion', 'mill', 'perf', 'mosaic'].indexOf(o.shellcbs) >= 0 ? o.shellcbs : 'plain'; m.shellfc = CBY[o.shellfc] ? o.shellfc : 'auto'; m.shelllc = CBY[o.shelllc] ? o.shelllc : 'auto'; m.shellcrestsh = o.shellcrestsh === 'round' ? 'round' : 'square'; m.shellnt = CBY[o.shellnt] ? o.shellnt : 'auto'; m.shellcrsd = ['A', 'N', 'E', 'S', 'W'].indexOf(o.shellcrsd) >= 0 ? o.shellcrsd : 'A'; m.shellnh = ['L', 'C', 'R'].indexOf(o.shellnh) >= 0 ? o.shellnh : 'L'; m.shellnv = ['low', 'mid', 'up'].indexOf(o.shellnv) >= 0 ? o.shellnv : 'up'; m.shellsh = o.shellsh === 'angled' || o.shellsh === 'square' || o.shellsh === 'rcorner' ? o.shellsh : 'round'; m.shellnm = ['none', 'A', 'N', 'S', 'E', 'W'].indexOf(o.shellnm) >= 0 ? o.shellnm : 'none'; m.shellnc = CBY[o.shellnc] ? o.shellnc : 'auto';
   m.shellpre = null;
   m.shellst = o.shellst === 'truss' ? 'truss' : o.shellst === 'lattice' ? 'lattice' : 'none'; m.shellrls = !!o.shellrls; m.shelltw = ['W', 'E', 'N', 'S'].indexOf(o.shelltw) >= 0 ? o.shelltw : 'none'; m.shellov = typeof o.shellov === 'number' ? Math.max(0, Math.min(100, Math.round(o.shellov))) : 0; m.shellrl = typeof o.shellrl === 'number' ? Math.max(0, Math.min(100, Math.round(o.shellrl))) : 50; m.shellk = o.shellk === 'steel' ? 'steel' : 'timber'; m.shellhv = typeof o.shellhv === 'number' ? Math.max(0, Math.min(100, Math.round(o.shellhv * 10) / 10)) : 40; m.shellc = CBY[o.shellc] ? o.shellc : 'auto'; m.shells = CBY[o.shells] ? o.shells : 'auto'; m.flagcol = CBY[o.flagcol] ? o.flagcol : 'red'; m.adart = o.adart === 'plain' ? 'plain' : 'brands'; m.allSeats = o.allSeats === true; m.perim = CBY[o.perim] ? o.perim : 'none'; m.ezc = CBY[o.ezc] ? o.ezc : 'blue'; m.ezt = CBY[o.ezt] ? o.ezt : 'white'; m.ezn = o.ezn !== false; m.track = o.track === true; m.furn = o.furn !== false; m.players = o.players === true; m.matchday = o.matchday === true; m.lights = m.lstyle !== 'none'; m.adcol = CBY[o.adcol] ? o.adcol : 'white';
   m.env = { auto: o.env ? inList(ENV_AUTO, o.env.auto, 'none') : 'none', cells: {} };
@@ -5819,7 +6147,7 @@ function sanitize(o) {
     const nn = function (v, lo, hi, df) { return typeof v === 'number' && isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : df; };
     const list = []; arr.slice(0, 3).forEach(function (c) {
       if (!c || typeof c !== 'object') return;
-      list.push({ on: c.on !== false, len: nn(c.len, 2, 30, 5), dep: nn(c.dep, 1, 8, 3), hgt: nn(c.hgt, 1, 10, 3), off: nn(c.off, -10, 10, 0), fac: FACADES.some(function (f) { return f[0] === c.fac && f[0] !== 'none'; }) ? c.fac : 'brick', wcol: CBY[c.wcol] ? c.wcol : 'auto', fcol: CBY[c.fcol] ? c.fcol : 'auto' });
+      list.push({ on: c.on !== false, len: nn(c.len, 2, 30, 5), dep: nn(c.dep, 1, 8, 3), hgt: nn(c.hgt, 1, 10, 3), off: nn(c.off, -10, 10, 0), fac: FACADES.some(function (f) { return f[0] === (FACMOVED[c.fac] || c.fac) && f[0] !== 'none'; }) ? (FACMOVED[c.fac] || c.fac) : 'brick', wcol: CBY[c.wcol] ? c.wcol : 'auto', fcol: CBY[c.fcol] ? c.fcol : 'auto' });
     });
     if (list.length) m.cb[sd] = list;
   });
@@ -5919,7 +6247,7 @@ function envAuto(style, dist, blocked) {
 }
 /* the final grid: auto layer under painted cells. Returns { tiles, props } with road axes and neighbours resolved */
 function envBuild(m, items) {
-  setGrid(m.n);
+  setGround(m);
   const env = m.env || { auto: 'none', cells: {} }, dist = envDist(items), occ = {};
   items.forEach(function (it) { occ[it.gx + ',' + it.gy] = 1; });
   const blocked = function (x, y) { return !!occ[x + ',' + y] || envPitchCell(x, y); };
@@ -7910,12 +8238,10 @@ const IC = (function () {
     openbrick: wall(f('M6 30H34V42H6Z') + f('M6 12H34V16H6Z') + f('M7 16H9V30H7ZM15 16H17V30H15ZM23 16H25V30H23ZM31 16H33V30H31Z') + l('M6 36H34M13 30V42M21 30V42M29 30V42')),
     colonnade: wall(f('M6 10H34V16H6Z') + f('M9 17H12V40H9ZM16 17H19V40H16ZM22 17H25V40H22ZM29 17H32V40H29Z') + f('M7 40H33V42H7Z')),
     deco: l('M6 42V22L10 15H30L34 22V42Z') + l('M10 15V10H14V15M26 15V10H30V15M17 15V8H23V15') + l('M13 22V42M20 22V42M27 22V42M6 22H34'),
-    modern: wall(f('M9 13H21V24H9ZM24 13H31V19H24ZM9 28H16V39H9ZM19 28H31V39H19Z') + l('M24 22H31')),
     louvre: wall(l('M9 14 31 11M9 19 31 16M9 24 31 21M9 29 31 26M9 34 31 31M9 39 31 36')),
     club: wall(f('M6 10H11V42H6ZM17 10H23V42H17ZM29 10H34V42H29Z') + l('M11 24H17M23 24H29')),
     cladding: wall(l('M6 16H34M6 22H34M6 28H34M6 34H34M6 40H34') + l('M16 10V16M26 16V22M12 22V28M28 28V34M20 34V40')),
     fins: wall(f('M8 10H10V42H8ZM13 10H15V42H13ZM18 10H20V42H18ZM23 10H25V42H23ZM28 10H30V42H28Z') + l('M6 10H34')),
-    tudor: wall(l('M6 22H34M13 10V42M27 10V42M6 10 13 22M34 10 27 22M13 22 6 34M27 22 34 34M20 10V22') + l('M6 34H34')),
     ribbon: wall(f('M8 15H32V21H8ZM8 28H32V34H8Z') + l('M16 15V21M24 15V21M16 28V34M24 28V34')),
     frame: wall(l('M8 10V40M16 10V40M24 10V40M32 10V40M8 24H32') + f('M10 28H14V34H10ZM18 28H22V34H18ZM26 28H30V34H26Z')),
     precast: wall(f('M10 14H13V36H10ZM16 14H19V36H16ZM22 14H25V36H22ZM28 14H31V36H28Z') + l('M8 12H32M8 38H32'))
@@ -8163,7 +8489,7 @@ function renderShell() {
     box.appendChild(b);
   });
   const csb = $('shellcsSeg'); if (csb) { csb.innerHTML = ''; [['none', 'None'], ['slim', 'Slim'], ['mast', 'Mast'], ['pylon', 'Pylon'], ['fork', 'Fork'], ['cluster', 'Cluster'], ['twin', 'Twin'], ['led', 'LED pole'], ['block', 'Building blocks']].forEach(function (x) { const b = mk('button', 'btn sm', x[1]); b.setAttribute('aria-pressed', (S.m.shellcs || 'none') === x[0] ? 'true' : 'false'); b.addEventListener('click', function () { edit(function (m) { m.shellcs = x[0]; }); }); csb.appendChild(b); }); }
-  [['shellcbwSeg', 'shellcbw', [['s', 'Narrow'], ['m', 'Medium'], ['l', 'Wide']], 'm'], ['shellcbdSeg', 'shellcbd', [['s', 'Shallow'], ['m', 'Medium'], ['l', 'Deep']], 'm'], ['shellcbsSeg', 'shellcbs', [['plain', 'Plain'], ['brick', 'Brick'], ['stone', 'Stone blocks'], ['glass', 'Glass'], ['empire', 'Old stadium']], 'plain']].forEach(function (q) {
+  [['shellcbwSeg', 'shellcbw', [['s', 'Narrow'], ['m', 'Medium'], ['l', 'Wide']], 'm'], ['shellcbdSeg', 'shellcbd', [['s', 'Shallow'], ['m', 'Medium'], ['l', 'Deep']], 'm'], ['shellcbsSeg', 'shellcbs', [['plain', 'Plain'], ['brick', 'Brick'], ['stone', 'Stone blocks'], ['glass', 'Glass'], ['empire', 'Old stadium'], ['towers', 'Towers'], ['concrete', 'Concrete'], ['deco', 'Art deco'], ['etfe', 'Cushion skin'], ['greenwall', 'Living wall'], ['timber', 'Timber'], ['gabion', 'Gabion'], ['mill', 'Victorian mill'], ['perf', 'Perforated'], ['mosaic', 'Mosaic']], 'plain']].forEach(function (q) {
     const sb = $(q[0]); if (!sb) return; sb.innerHTML = ''; q[2].forEach(function (x) { const b = mk('button', 'btn sm', x[1]); b.setAttribute('aria-pressed', (S.m[q[1]] || q[3]) === x[0] ? 'true' : 'false'); b.addEventListener('click', function () { edit(function (m) { m[q[1]] = x[0]; }); }); sb.appendChild(b); }); });
   ['shellcbwRow', 'shellcbdRow', 'shellcbsRow'].forEach(function (id) { const e = $(id); if (e) e.hidden = !(S.m.shell !== 'none' && S.m.shellcs === 'block'); });
   const cnb = $('shellcnSeg'); if (cnb) { cnb.innerHTML = ''; [4, 8, 12, 16, 24, 32, 40, 86].forEach(function (n) { const b = mk('button', 'btn sm', String(n)); b.setAttribute('aria-pressed', (S.m.shellcn || 8) === n ? 'true' : 'false'); b.addEventListener('click', function () { edit(function (m) { m.shellcn = n; }); }); cnb.appendChild(b); }); }
@@ -8281,7 +8607,7 @@ function renderPosts() {
 }
 /* Colour pickers sit directly under the option they belong to. */
 /* facade styles with a fixed palette take no wall colour; those (and the raking piers) take no fascia colour either */
-const NOWALL = { none: 1, arcade: 1, colonnade: 1, deco: 1, modern: 1, louvre: 1 }, NOFAS = Object.assign({ buttress: 1 }, NOWALL);
+const NOWALL = { none: 1, arcade: 1, colonnade: 1, deco: 1, louvre: 1 }, NOFAS = Object.assign({ buttress: 1 }, NOWALL);
 const COLTGT = [
   { id: 'seat', get: function (m, s) { return s.col; }, set: function (m, s, c) { s.col = c; } },
   { id: 'acc', get: function (m, s) { return s.acol; }, set: function (m, s, c) { s.acol = c; }, show: function (s) { return s.pattern === 'text' || s.pattern === 'stripe' || s.pattern === 'check'; } },
@@ -8490,7 +8816,7 @@ function uiSync() {
   const s = cur(), corner = isCorner(S.selSt);
   if (S.selSec >= s.secs.length) S.selSec = 0;
   { const gk = S.selSt + (corner && cornerGone(s) ? 'g' : ''); if (S.lastSelKey !== gk) { S.lastSelKey = gk; } }
-  renderTabs(); renderSeg('roofSeg', ROOFS, 'roof'); renderSeg('seatTypeSeg', SEATTYPES, 'seating'); if (s.bkx == null) s.bkx = 0; renderSeg('bkSeg', BKS, 'bkx'); if (s.stp == null) s.stp = 0; renderSeg('stpSeg', STPS, 'stp'); $('stpRow').hidden = corner; if (corner) { const cd = CORNERS[S.selSt]; renderSeg('cexSeg', CEPS, 'cex'); renderSeg('ceySeg', CEPS, 'cey'); renderSeg('cshSeg', [['round', 'Round'], ['facet', 'Faceted'], ['angled', 'Angled']], 'cshape'); $('cexLab').textContent = 'End panel beside ' + stName(cd.ns); $('ceyLab').textContent = 'End panel beside ' + stName(cd.ew); } $('cexRow').hidden = $('ceyRow').hidden = $('cshRow').hidden = !corner; $('bkRow').hidden = corner || standDims(s, 99).T !== 1; renderSeg('lenSeg', ROOFLEN, 'rlen'); $('lenRow').hidden = s.roof === 'none'; renderSeg('lampSeg', ROOFLIGHTS, 'rlights'); if (s.plate == null) s.plate = 'off'; renderSeg('plateSeg', PLATES, 'plate'); if (!s.seg) s.seg = 'off'; renderSeg('segSeg', SEGS, 'seg'); $('segRow').hidden = corner; $('segSteps').hidden = corner || s.seg === 'off'; $('rtxtRow').hidden = corner || s.roof === 'none'; { const ri = $('rtxtIn'); if (document.activeElement !== ri && ri.value !== (s.rtxt || '')) ri.value = s.rtxt || ''; } $('plateRow').hidden = corner || s.roof !== 'shed'; $('plateSteps').hidden = corner || s.roof !== 'shed' || s.plate !== 'on'; $('lampRow').hidden = corner || s.roof === 'none'; renderShell(); renderLS(); renderLawn(); renderSeg('crowdSeg', CROWDS, 'crowd'); renderSeg('signSeg', SIGNS, 'sign'); $('signRow').hidden = corner; renderSeg('capSeg', ENDCAPS, 'endcap'); renderSeg('capShSeg', ENDSHAPES, 'ecs'); renderSeg('facSeg', FACADES, 'facade'); renderSeg('archSeg', ARCHS, 'arch'); renderSeg('brDepSeg', BRDEPS, 'fdep'); renderSeg('brWinSeg', BRWINS, 'fwin'); renderSeg('brGabSeg', BRGABS, 'fgab'); renderSeg('brGfSeg', BRGFS, 'fgf'); $('brOpts').hidden = s.facade !== 'brick'; renderSeg('gfSeg', GFLOORS.filter(function (g) { return !(s.facade === 'brick' && g[0] === 'turn'); }), 'gfloor'); renderOutSeg(); $('outRow').hidden = corner || s.facade === 'none'; $('gfRow').hidden = true; $('archRow').hidden = corner || s.facade === 'none'; renderSeg('patSeg', PATTERNS, 'pattern'); { const sr = $('stextRow'), si = $('stextIn'); if (sr && si) { sr.hidden = s.pattern !== 'text'; if (document.activeElement !== si) si.value = s.stext || ''; const pr2 = $('stposRow'), pi = $('stposRng'); if (pr2 && pi) { pr2.hidden = s.pattern !== 'text'; pi.value = s.stpos == null ? 50 : s.stpos; } } } renderTargets(); renderColors(); renderSecs(); renderFeats(); renderView();
+  renderTabs(); renderSeg('roofSeg', ROOFS, 'roof'); renderSeg('seatTypeSeg', SEATTYPES, 'seating'); if (s.bkx == null) s.bkx = 0; renderSeg('bkSeg', BKS, 'bkx'); if (s.stp == null) s.stp = 0; renderSeg('stpSeg', STPS, 'stp'); $('stpRow').hidden = corner; if (corner) { const cd = CORNERS[S.selSt]; renderSeg('cexSeg', CEPS, 'cex'); renderSeg('ceySeg', CEPS, 'cey'); renderSeg('cshSeg', [['round', 'Round'], ['facet', 'Faceted'], ['angled', 'Angled']], 'cshape'); $('cexLab').textContent = 'End panel beside ' + stName(cd.ns); $('ceyLab').textContent = 'End panel beside ' + stName(cd.ew); } $('cexRow').hidden = $('ceyRow').hidden = $('cshRow').hidden = !corner; $('bkRow').hidden = corner || standDims(s, 99).T !== 1; renderSeg('lenSeg', ROOFLEN, 'rlen'); $('lenRow').hidden = s.roof === 'none'; renderSeg('lampSeg', ROOFLIGHTS, 'rlights'); if (s.plate == null) s.plate = 'off'; renderSeg('plateSeg', PLATES, 'plate'); if (!s.seg) s.seg = 'off'; renderSeg('segSeg', SEGS, 'seg'); $('segRow').hidden = corner; $('segSteps').hidden = corner || s.seg === 'off'; $('rtxtRow').hidden = corner || s.roof === 'none'; { const ri = $('rtxtIn'); if (document.activeElement !== ri && ri.value !== (s.rtxt || '')) ri.value = s.rtxt || ''; } $('plateRow').hidden = corner || s.roof !== 'shed'; $('plateSteps').hidden = corner || s.roof !== 'shed' || s.plate !== 'on'; $('lampRow').hidden = corner || s.roof === 'none'; renderShell(); renderLS(); renderLawn(); renderSeg('crowdSeg', CROWDS, 'crowd'); renderSeg('signSeg', SIGNS, 'sign'); $('signRow').hidden = corner; renderSeg('capSeg', ENDCAPS, 'endcap'); renderSeg('capShSeg', ENDSHAPES, 'ecs'); renderSeg('facSeg', FACADES, 'facade'); renderSeg('archSeg', ARCHS, 'arch'); renderSeg('brDepSeg', BRDEPS, 'fdep'); { const cn = s.facade === 'concrete', gl = s.facade === 'glass', tw = s.facade === 'towers'; renderSeg('brWinSeg', cn ? CNWINS : gl ? GLWINS : BRWINS, 'fwin'); renderSeg('brGabSeg', cn ? CNGABS : gl ? GLGABS : tw ? TWGABS : BRGABS, 'fgab'); } renderSeg('brGfSeg', BRGFS, 'fgf'); { const nw = ['etfe', 'greenwall', 'timber', 'gabion', 'mill', 'perf', 'mosaic', 'brickpier', 'deco'].indexOf(s.facade) >= 0; $('brOpts').hidden = !nw && s.facade !== 'brick' && s.facade !== 'concrete' && s.facade !== 'glass' && s.facade !== 'towers'; $('brWinSeg').parentNode.hidden = nw; $('brGabSeg').parentNode.hidden = nw; } renderSeg('gfSeg', GFLOORS.filter(function (g) { return !(s.facade === 'brick' && g[0] === 'turn'); }), 'gfloor'); renderOutSeg(); $('outRow').hidden = corner || s.facade === 'none'; $('gfRow').hidden = true; $('archRow').hidden = corner || s.facade === 'none'; renderSeg('patSeg', PATTERNS, 'pattern'); { const sr = $('stextRow'), si = $('stextIn'); if (sr && si) { sr.hidden = s.pattern !== 'text'; if (document.activeElement !== si) si.value = s.stext || ''; const pr2 = $('stposRow'), pi = $('stposRng'); if (pr2 && pi) { pr2.hidden = s.pattern !== 'text'; pi.value = s.stpos == null ? 50 : s.stpos; } } } renderTargets(); renderColors(); renderSecs(); renderFeats(); renderView();
   renderSeg('premSeg', [[0, 'Off'], [1, 'On']], 'prem'); renderSeg('prowSeg', [[1, '1 row'], [2, '2 rows']], 'prow'); renderSeg('povSeg', [[1, 'Short'], [2, 'Medium'], [3, 'Long']], 'pov'); $('premBox').hidden = !s.prem;
   ['tiers', 'depth', 'height'].forEach(function (p) {
     $('o-' + p).textContent = s[p];
@@ -8504,7 +8830,7 @@ function uiSync() {
     document.querySelectorAll('[data-p="' + p + '"]').forEach(function (b) { const d = +b.dataset.d; b.disabled = (d < 0 && v <= LIM[p][0]) || (d > 0 && v >= LIM[p][1]); });
   });
   { $('postSegRow').hidden = corner; const noCap = corner || s.roof === 'none' || s.endcap === 'none'; $('capShRow').hidden = noCap; $('capSteps').hidden = noCap; $('frontPickRow').hidden = $('frontSteps').hidden = corner || s.roof === 'none' || s.posts === false; $('postPickRow').hidden = corner || s.roof === 'none' || s.rlen !== 'long'; }
-  $('outSteps').hidden = corner || s.facade === 'none' || !outAny(s); $('entSteps').hidden = corner || s.facade === 'none' || !outFl(s).oe;
+  $('outSteps').hidden = corner || s.facade === 'none' || !outAny(s); $('entSteps').hidden = corner || s.facade === 'none' || !outFl(s).oe; renderSeg('entStySeg', ENTSTY, 'oes'); $('entStyRow').hidden = $('entSteps').hidden;
   { const sh = !!(S.m.shell && S.m.shell !== 'none'); $('aMatchday').hidden = sh; }
   $('aOn').setAttribute('aria-pressed', s.on ? 'false' : 'true');
   $('addStandRow').hidden = corner; $('addStand').hidden = !!s.on; $('ucBtn').setAttribute('aria-pressed', s.uc ? 'true' : 'false');
@@ -8523,7 +8849,7 @@ function uiSync() {
   const sec = s.secs[S.selSec];
   const cf = corner && cornerGone(s) && s.feat !== 'none';
   const where = corner ? '' : S.allSecs ? ', all ' + NSEC + ' sections' : ', section ' + (S.selSec + 1) + ' of ' + NSEC;
-  if (cf) { const od = officeDims(s); $('info').innerHTML = '<b>' + stName(S.selSt) + '</b>: ' + (s.feat === 'office2' ? 'office block with an LED screen on the angled face' : s.feat === 'office3' ? 'plain office block' : 'office block with executive boxes on a 45\u00b0 corner') + ', ' + od[0] + ' by ' + od[1] + ' cells, ' + s.height + (s.height > 1 ? ' storeys' : ' storey') + ', ' + label(FACADES, s.facade === 'none' ? 'modern' : s.facade).toLowerCase() + ' facade. Size and Height set it; Facade and the colours style it.'; }
+  if (cf) { const od = officeDims(s); $('info').innerHTML = '<b>' + stName(S.selSt) + '</b>: ' + (s.feat === 'office2' ? 'office block with an LED screen on the angled face' : s.feat === 'office3' ? 'plain office block' : 'office block with executive boxes on a 45\u00b0 corner') + ', ' + od[0] + ' by ' + od[1] + ' cells, ' + s.height + (s.height > 1 ? ' storeys' : ' storey') + ', ' + label(FACADES, s.facade === 'none' ? 'cladding' : s.facade).toLowerCase() + ' facade. Size and Height set it; Facade and the colours style it.'; }
   else $('info').innerHTML = '<b>' + stName(S.selSt) + '</b>' + where + ': ' + label(FEATS, sec.f).toLowerCase() + '. ' +
     tierText(s) + ', ' + s.depth + ' deep, ' +
     (s.roof === 'none' ? 'no roof' : label(ROOFS, s.roof).toLowerCase() + ' roof') + ', ' + label(FACADES, s.facade).toLowerCase() + ' back.' +
@@ -8581,7 +8907,7 @@ function copyStyle(keys) {
     keys.forEach(function (k) {
       if (k === S.selSt) return;
       const t = m.st[k];
-      ['tiers', 'depth', 'height', 'prem', 'prow', 'pov', 'ccol', 'rtxt', 'rtcol', 'seg', 'segx', 'segc', 'roof', 'rlen', 'rlights', 'plate', 'plof', 'crowd', 'endcap', 'ecl', 'ecs', 'rdis', 'tdis', 'fdis', 'fpo', 'posts', 'arch', 'fdep', 'fwin', 'fgab', 'fgf', 'facade', 'gfloor', 'outer', 'ob', 'os', 'ot', 'oe', 'oc', 'of', 'ow', 'od', 'ew', 'ed', 'fcol', 'wcol', 'scol', 'col', 'rcol', 'xcol', 'ocol', 'seating', 'bkx', 'stp', 'cex', 'cey', 'cshape', 'ucol', 'rfc', 'tcol', 'tbar', 'pcol', 'bcol', 'lat', 'lat2', 'lcol', 'lcol2', 'acol', 'pattern', 'stext', 'stpos'].forEach(function (p) { t[p] = s[p]; });
+      ['tiers', 'depth', 'height', 'prem', 'prow', 'pov', 'ccol', 'rtxt', 'rtcol', 'seg', 'segx', 'segc', 'roof', 'rlen', 'rlights', 'plate', 'plof', 'crowd', 'endcap', 'ecl', 'ecs', 'rdis', 'tdis', 'fdis', 'fpo', 'posts', 'arch', 'fdep', 'fwin', 'fgab', 'fgf', 'facade', 'gfloor', 'outer', 'ob', 'os', 'ot', 'oe', 'oes', 'oc', 'of', 'ow', 'od', 'ew', 'ed', 'fcol', 'wcol', 'scol', 'col', 'rcol', 'xcol', 'ocol', 'seating', 'bkx', 'stp', 'cex', 'cey', 'cshape', 'ucol', 'rfc', 'tcol', 'tbar', 'pcol', 'bcol', 'lat', 'lat2', 'lcol', 'lcol2', 'acol', 'pattern', 'stext', 'stpos'].forEach(function (p) { t[p] = s[p]; });
       if (isCorner(k) === same) t.secs = JSON.parse(JSON.stringify(s.secs));
       else t.secs.forEach(function (x) { x.f = 'seats'; x.c = null; });
       if (isCorner(k) && t.secs[0].f === 'tunnel') t.secs[0].f = 'seats';
@@ -8829,6 +9155,13 @@ function resizeGround(n) {
   if (again) applyPreset(pl.pz);
   fit();
 }
+function setPitchSize(w, l) {   // the pitch grows or shrinks about the centre; the ground is enlarged if the stands need more room
+  const pl = S.presetLast, again = pl && pl.auto === S.m.env.auto && pl.key === JSON.stringify(S.m.env.cells), need = w >= 12 ? 50 : w >= 10 ? 40 : 30, n = Math.max(S.m.n || 30, need);
+  if ((S.m.pitW || 8) === w && (S.m.pitL || 12) === l) return;
+  edit(function (m) { m.pitW = w; m.pitL = l; });
+  if (n !== (S.m.n || 30)) resizeGround(n); else if (again) applyPreset(pl.pz);
+  fit();
+}
 function cbGet(sd) { const v = S.m.cb && S.m.cb[sd]; return Array.isArray(v) ? v : []; }
 function renderCb() {
   const sd = S.cbSide || 'S', list = cbGet(sd);
@@ -8887,6 +9220,16 @@ function renderEnv() {
     const b = mk('button', 'btn sm', x[0]); if (i === 1) { b.setAttribute('aria-pressed', 'true'); b.style.cursor = 'default'; b.setAttribute('aria-label', 'Current ground size'); }
     else { b.disabled = x[1] < 30 || x[1] > 60; b.addEventListener('click', function () { resizeGround(x[1]); }); }
     gb.appendChild(b);
+  });
+  const cs = $('camSeg'); cs.innerHTML = '';
+  CAMS.forEach(function (x) {
+    const b = mk('button', 'btn sm', x[1]); b.setAttribute('aria-pressed', (S.m.cam || 'std') === x[0] ? 'true' : 'false');
+    b.addEventListener('click', function () { if ((S.m.cam || 'std') === x[0]) return; edit(function (m) { m.cam = x[0]; }); fit(); }); cs.appendChild(b);
+  });
+  const ps = $('envPitchSeg'); ps.innerHTML = '';
+  PITSZ.forEach(function (x) {
+    const b = mk('button', 'btn sm', x[2]); b.setAttribute('aria-pressed', (S.m.pitW || 8) === x[0] && (S.m.pitL || 12) === x[1] ? 'true' : 'false');
+    b.addEventListener('click', function () { setPitchSize(x[0], x[1]); }); ps.appendChild(b);
   });
   const box = $('envAutoSeg'); box.innerHTML = '';
   ENV_AUTO.forEach(function (x) {
