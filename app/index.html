@@ -787,8 +787,8 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
   <div class="pane" data-pane="tiles" hidden>
     <h4 class="qh">Ground size</h4>
     <div class="row gsz"><div class="seg" id="envGridSeg"></div></div>
-    <h4 class="qh">Pitch size</h4>
-    <div class="row"><div class="seg" id="envPitchSeg" style="flex-wrap:wrap"></div></div>
+    <h4 class="qh" hidden>Pitch size</h4>
+    <div class="row" hidden><div class="seg" id="envPitchSeg" style="flex-wrap:wrap"></div></div>
     <div class="info">Each step adds or removes two tiles along every side. Bigger grounds leave more room for a surround.</div>
   </div>
   <div class="pane" data-pane="decor" hidden>
@@ -2079,7 +2079,7 @@ function migrateModel(m) { ALL_KEYS.forEach(function (k) { const x = migrateTDH(
 function newModel() {
   const st = {};
   ALL_KEYS.forEach(function (k) { st[k] = defStand(isCorner(k) ? { ads: false } : {}, isCorner(k) ? 1 : NSEC); });
-  return { sv: 4, yaw: 0, cam: 'std', n: 40, pitW: 10, pitL: 16, pw: 2, shellrl: 50, st: st, lights: true, adcol: 'white', track: false, pitch: 'football', furn: true, players: false, matchday: false, flagcol: 'red', adart: 'brands', allSeats: false, perim: 'none', ezc: 'blue', ezt: 'white', ezn: true, lstyle: 'lattice', shell: 'none', shellhv: 40, shellk: 'timber', shellsk: 'slats', shellrf: 'solid', shellp: false, shellcol: false, shellcrest: null, shellcrestc: 'auto', shellg: false, shellr: false, shelle: false, shellw: false, shellsl: false, shellgt: false, shellc: 'auto', shells: 'auto', lawn: 'h', lawnw: 'med', shade: 'soft', tod: 'day', sun: 'SW', env: { auto: 'concourse', cells: {} }, cb: {}, name: '', team: '', town: '' };
+  return { sv: 4, yaw: 0, cam: 'std', n: 40, pitW: 12, pitL: 20, pw: 2, shellrl: 50, st: st, lights: true, adcol: 'white', track: false, pitch: 'football', furn: true, players: false, matchday: false, flagcol: 'red', adart: 'brands', allSeats: false, perim: 'none', ezc: 'blue', ezt: 'white', ezn: true, lstyle: 'lattice', shell: 'none', shellhv: 40, shellk: 'timber', shellsk: 'slats', shellrf: 'solid', shellp: false, shellcol: false, shellcrest: null, shellcrestc: 'auto', shellg: false, shellr: false, shelle: false, shellw: false, shellsl: false, shellgt: false, shellc: 'auto', shells: 'auto', lawn: 'h', lawnw: 'med', shade: 'soft', tod: 'day', sun: 'SW', env: { auto: 'concourse', cells: {} }, cb: {}, name: '', team: '', town: '' };
 }
 function setK(m, keys, o) { keys.forEach(function (k) { Object.assign(m.st[k], o); }); }
 function preset(name) {
