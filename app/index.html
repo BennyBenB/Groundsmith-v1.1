@@ -1070,8 +1070,9 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
       <label>Town or city<input id="fTown" maxlength="40" autocomplete="off" placeholder="e.g. Northampton"></label>
     </div>
     <h2>Camera angle</h2>
-    <p>Standard is the classic isometric view. Lower tilts the camera towards pitch level, so the stands stand taller and the ground looks flatter.</p>
-    <div class="row"><div class="seg" id="camSeg"></div></div>
+    <p>Classic is the corner-on isometric view. Angled turns the camera 30° so it looks more squarely down the pitch at the far stand; use the ground view buttons to look from any side. Lower tilts the camera towards pitch level, so the stands stand taller and the ground looks flatter.</p>
+    <div class="row"><span class="lab">Turn</span><div class="seg" id="yawSeg"></div></div>
+    <div class="row"><span class="lab">Height</span><div class="seg" id="camSeg"></div></div>
     <h2>Breakdown</h2>
     <div class="bd" id="bd"></div>
     <h2>My stadiums</h2>
@@ -1117,7 +1118,15 @@ hr.div { border: 0; border-top: 1px solid var(--glass-line, var(--line)); margin
 'use strict';
 /* ---------- constants ---------- */
 let N = 30, PX = 11, PY = 9, PW = 8, PL = 12; const NSEC = 6;   // grid, pitch origin and size (cells), sections per stand
-let TW = 64, TH = 32, BH = 26;                            // tile width, tile height, pixels per level of height
+let TW = 64, TH = 32, BH = 26;
+/* the ground is projected with one 2x2 matrix: screen x = a*MA + b*MB, screen y = a*MC + b*MD (and minus height). YAW turns the camera away from the classic corner view; 0 is the classic 2:1 isometric. */
+let YAW = 0, MA = 32, MB = -32, MC = 16, MD = 16, CX0 = -32, CX1 = 32, CW = 64, CH = 32, DKA = 1, DKB = 1;
+function setYawProj() { const f = (45 - YAW) * Math.PI / 180, s2 = Math.SQRT2; MA = TW / s2 * Math.cos(f); MB = -TW / s2 * Math.sin(f); MC = TH / s2 * Math.sin(f); MD = TH / s2 * Math.cos(f); CX0 = Math.min(0, MA, MB, MA + MB); CX1 = Math.max(0, MA, MB, MA + MB); CW = CX1 - CX0; CH = Math.max(0, MC, MD, MC + MD); DKA = s2 * Math.sin(f); DKB = s2 * Math.cos(f); }
+function dropProjCaches() { spriteCache.clear(); spriteBytes = 0; [typeof grassFxC !== 'undefined' && grassFxC, typeof tileCache !== 'undefined' && tileCache].forEach(function (o) { if (o) Object.keys(o).forEach(function (k) { delete o[k]; }); }); }   // every cached sprite and ground tile was drawn for the old projection
+function setYaw(deg) { deg = +deg || 0; if (deg === YAW) return; YAW = deg; setYawProj(); dropProjCaches(); }
+function SX(a, b) { return a * MA + b * MB; }
+function SY(a, b) { return a * MC + b * MD; }
+function DK(a, b) { return a * DKA + b * DKB; }   // depth along the view direction, scaled so it equals x + y in the classic view                            // tile width, tile height, pixels per level of height
 
 /* ---------- colour ---------- */
 function parse(h) { if (h.charAt(0) === 'r') { const m = h.match(/[\d.]+/g); return [+m[0], +m[1], +m[2]]; } h = h.replace('#', ''); const n = parseInt(h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
@@ -1357,17 +1366,17 @@ function setReal(v) { REAL = 1; try { localStorage.setItem('gs_look', REAL === 3
 function descKey(desc) { return JSON.stringify(desc); }
 function buildSprite(desc, view) {
   const bxs = desc.map(function (a) { return rotBox(toBox(a), view); });
-  let mz = 0.1, minX = 0, maxX = TW, minT = 0, maxY = TH;   // boxes that lean out past their cell (the brutalist fins) widen and heighten the sprite so nothing is clipped at the cell edge
+  let mz = 0.1, minX = 0, maxX = CW, minT = 0, maxY = CH;   // boxes that lean out past their cell (the brutalist fins) widen and heighten the sprite so nothing is clipped at the cell edge
   bxs.forEach(function (b) {
     if (b.z1 > mz) mz = b.z1;
-    const l = (b.x0 - b.y1) * TW / 2 + TW / 2, r = (b.x1 - b.y0) * TW / 2 + TW / 2, bt = (b.x1 + b.y1) * TH / 2 - b.z0 * BH;
-    if (l < minX) minX = l; if (r > maxX) maxX = r; if (bt > maxY) maxY = bt; const tp = (b.x0 + b.y0) * TH / 2 - b.z1 * BH + b.z1 * BH; if (tp < minT) minT = tp;
+    const cxs = [SX(b.x0, b.y0), SX(b.x1, b.y0), SX(b.x0, b.y1), SX(b.x1, b.y1)], cys = [SY(b.x0, b.y0), SY(b.x1, b.y0), SY(b.x0, b.y1), SY(b.x1, b.y1)], l = Math.min.apply(null, cxs) - CX0, r = Math.max.apply(null, cxs) - CX0, bt = Math.max.apply(null, cys) - b.z0 * BH;
+    if (l < minX) minX = l; if (r > maxX) maxX = r; if (bt > maxY) maxY = bt; const tp = Math.min.apply(null, cys); if (tp < minT) minT = tp;
   });
-  const xoff = minX < 0 ? Math.ceil(-minX) + 1 : 0, wid = TW + xoff + (maxX > TW ? Math.ceil(maxX - TW) + 1 : 0);
+  const xoff = minX < 0 ? Math.ceil(-minX) + 1 : 0, wid = CW + xoff + (maxX > CW ? Math.ceil(maxX - CW) + 1 : 0);
   const yoff = Math.ceil(mz * BH) + 3 + (minT < 0 ? Math.ceil(-minT) : 0);
-  const s = document.createElement('canvas'); s.width = wid; s.height = yoff + Math.ceil(maxY) + (maxY > TH ? 2 : 0); s.yoff = yoff; s.xoff = xoff;
+  const s = document.createElement('canvas'); s.width = wid; s.height = yoff + Math.ceil(maxY) + (maxY > CH ? 2 : 0); s.yoff = yoff; s.xoff = xoff;
   const ctx = s.getContext('2d', { willReadFrequently: true });
-  const P = function (x, y, z) { return [(x - y) * TW / 2 + TW / 2 + xoff, yoff + (x + y) * TH / 2 - z * BH]; };
+  const P = function (x, y, z) { return [SX(x, y) - CX0 + xoff, yoff + SY(x, y) - z * BH]; };
   if (REAL >= 2) {   // 'Rendered': draw at double size and shrink, so every edge is anti-aliased and soft
     const wk = document.createElement('canvas'); wk.width = s.width * 2; wk.height = s.height * 2; const wc = wk.getContext('2d'); wc.scale(2, 2);
     orderBoxes(bxs, desc.exact).forEach(function (b) { drawBoxP(wc, b, P); });
@@ -1398,18 +1407,18 @@ function spriteFor(desc, view) { return spriteMake(desc, descKey(desc), view); }
 function vc(x, y, v) {
   switch (v) { case 0: return [x, y]; case 1: return [N - y, x]; case 2: return [N - x, N - y]; default: return [y, N - x]; }
 }
-function wp(x, y, z, v) { const q = vc(x, y, v); return [(q[0] - q[1]) * TW / 2, (q[0] + q[1]) * TH / 2 - (z || 0) * BH]; }
+function wp(x, y, z, v) { const q = vc(x, y, v); return [SX(q[0], q[1]), SY(q[0], q[1]) - (z || 0) * BH]; }
 function worldBox(ctx, a, v) {
   const p = vc(a[0], a[1], v), q = vc(a[2], a[3], v);
   const b = { x0: Math.min(p[0], q[0]), x1: Math.max(p[0], q[0]), y0: Math.min(p[1], q[1]), y1: Math.max(p[1], q[1]), z0: a[4], z1: a[5], f: { top: a[6], left: a[7], right: a[8] } };
-  drawBoxP(ctx, b, function (x, y, z) { return [(x - y) * TW / 2, (x + y) * TH / 2 - z * BH]; });
+  drawBoxP(ctx, b, function (x, y, z) { return [SX(x, y), SY(x, y) - z * BH]; });
 }
 /* ---------- pitch: a painted grass texture (mown stripes, grain, worn patches, pitch markings) ---------- */
 const PM = 0.12, PMG = 1, PTX = { x0: PX - PMG, y0: PY - PMG, get w() { return PW + 2 * PMG; }, get h() { return PL + 2 * PMG; }, ppu: 40, cv: null, cvs: {} };
 /* the grid can be enlarged (30..60, even); the pitch stays centred in it */
 function setPitch(w, l) { w = Math.max(8, Math.min(16, Math.round(+w / 2) * 2 || 8)); l = Math.max(12, Math.min(24, Math.round(+l / 2) * 2 || 12)); if (w !== PW || l !== PL) { PW = w; PL = l; PTX.cv = null; PTX.cvs = {}; } return [PW, PL]; }
-function setCamera(id) { const c = CAMS.filter(function (x) { return x[0] === id; })[0] || CAMS[0]; if (TH !== c[2] || BH !== c[3]) { TH = c[2]; BH = c[3]; spriteCache.clear(); spriteBytes = 0; PTX.cv = null; PTX.cvs = {}; } }   // a lower camera flattens the ground and stretches height; every cached sprite is drawn for the old angle
-function setGround(m) { setCamera(m.cam); setPitch(m.pitW || 8, m.pitL || 12); setGrid(m.n); }
+function setCamera(id) { const c = CAMS.filter(function (x) { return x[0] === id; })[0] || CAMS[0]; if (TH !== c[2] || BH !== c[3]) { TH = c[2]; BH = c[3]; setYawProj(); dropProjCaches(); PTX.cv = null; PTX.cvs = {}; } }   // a lower camera flattens the ground and stretches height; every cached sprite is drawn for the old angle
+function setGround(m) { setCamera(m.cam); setYaw(m.yaw || 0); setPitch(m.pitW || 8, m.pitL || 12); setGrid(m.n); }
 function setGrid(n) { n = Math.max(30, Math.min(60, Math.round(+n / 2) * 2 || 30)); N = n; PX = (n - PW) / 2; PY = (n - PL) / 2; PTX.x0 = PX - PMG; PTX.y0 = PY - PMG; return n; }
 function pitchTexture(track, lawn, lw, pt, ez, perim) {
   const PR = perim && /^#[0-9a-f]{6}$/i.test(perim) ? [parseInt(perim.substr(1, 2), 16), parseInt(perim.substr(3, 2), 16), parseInt(perim.substr(5, 2), 16)] : null;
@@ -1598,7 +1607,7 @@ function drawWorld(ctx, arr, v) {
     const p = vc(a[0], a[1], v), q = vc(a[2], a[3], v);
     return { x0: Math.min(p[0], q[0]), x1: Math.max(p[0], q[0]), y0: Math.min(p[1], q[1]), y1: Math.max(p[1], q[1]), z0: a[4], z1: a[5], s: a[9] || 0, d: rotDecals(a[10], v), w: rotW(a[11], v), f: { top: a[6], left: a[7], right: a[8] } };
   });
-  orderBoxes(rb).forEach(function (b) { drawBoxP(ctx, b, function (X, Y, Z) { return [(X - Y) * TW / 2, (X + Y) * TH / 2 - Z * BH]; }); });
+  orderBoxes(rb).forEach(function (b) { drawBoxP(ctx, b, function (X, Y, Z) { return [SX(X, Y), SY(X, Y) - Z * BH]; }); });
 }
 function drawPlayer(ctx, x, y, dir, ph, p) {   // a small running footballer drawn as smooth shapes: boots, socks, shorts, shirt, swinging arms, head and hair
   const sh = p.sh, dk = mix(sh, 0.72), lt = mix(sh, 1.12), shorts = p.t ? '#f2f2ee' : '#20252c', skin = ['#e8c4a0', '#c9a07a', '#a98060'][Math.floor(h32(Math.round(x), Math.round(y), 7, 7, 7) * 3)];
@@ -1654,7 +1663,7 @@ function drawPitch(ctx, v, zoom, m) {
       const p = vc(a[0], a[1], v), q = vc(a[2], a[3], v);
       return { x0: Math.min(p[0], q[0]), x1: Math.max(p[0], q[0]), y0: Math.min(p[1], q[1]), y1: Math.max(p[1], q[1]), z0: a[4], z1: a[5], s: a[9] || 0, d: rotDecals(a[10], v), w: rotW(a[11], v), f: { top: a[6], left: a[7], right: a[8] } };
     });
-    orderBoxes(rb).forEach(function (b) { drawBoxP(ctx, b, function (X, Y, Z) { return [(X - Y) * TW / 2, (X + Y) * TH / 2 - Z * BH]; }); });
+    orderBoxes(rb).forEach(function (b) { drawBoxP(ctx, b, function (X, Y, Z) { return [SX(X, Y), SY(X, Y) - Z * BH]; }); });
   });
 
   if (m && m.players) {   // two teams in a 4-4-2 and the ball, as tiny figures (home shirts follow the west stand colour)
@@ -2032,6 +2041,7 @@ const BRDEPS = [['flat', 'Flat'], ['low', 'Shallow'], ['deep', 'Deep']], BRWINS 
 const ARCHS = [['none', 'Plain'], ['blocks', 'Blocks'], ['doors', 'Entrances'], ['mixed', 'Both']];
 const FACADES = [['none', 'Open'], ['brick', 'Brick'], ['towers', 'Towers'], ['ribbed', 'Ribbed'], ['banded', 'Banded'], ['concrete', 'Concrete'], ['glass', 'Glass'], ['glazed', 'Fully glazed'], ['steel', 'Steel'], ['arcade', 'Arcade'], ['colonnade', 'Colonnade'], ['deco', 'Art deco'], ['louvre', 'Louvres'], ['openbrick', 'Open frame & brick'], ['club', 'Club colours'], ['cladding', 'Cladding'], ['fins', 'Fins'], ['ribbon', 'Ribbon'], ['frame', 'Frame & brick'], ['timberglass', 'Timber & glass bands'], ['precast', 'Precast panels'], ['buttress', 'Raking piers'], ['etfe', 'Cushion skin'], ['greenwall', 'Living wall'], ['timber', 'Timber boards'], ['gabion', 'Gabion stone'], ['mill', 'Victorian mill'], ['perf', 'Perforated screen'], ['mosaic', 'Tile mosaic'], ['brickpier', 'Brick piers']];
 const FACMOVED = { modern: 'cladding', tudor: 'timber' };   // styles that were removed: saved stadiums that used them move to the nearest remaining one
+const YAWS = [[0, 'Classic'], [30, 'Angled left'], [-30, 'Angled right']];
 const CAMS = [['std', 'Standard', 32, 26], ['low', 'Low', 24, 30], ['vlow', 'Very low', 18, 34]];
 const PITSZ = [[8, 12, 'Small 8 \u00d7 12'], [10, 16, 'Standard 10 \u00d7 16'], [12, 20, 'Large 12 \u00d7 20']];
 const ENTSTY = [['glass', 'Stone & glass'], ['glazedbox', 'Glazed box'], ['brickpier', 'Brick piers'], ['brickgable', 'Brick gable'], ['concportal', 'Concrete portal'], ['conccanopy', 'Concrete canopy'], ['glassatrium', 'Glass atrium']];
@@ -2069,7 +2079,7 @@ function migrateModel(m) { ALL_KEYS.forEach(function (k) { const x = migrateTDH(
 function newModel() {
   const st = {};
   ALL_KEYS.forEach(function (k) { st[k] = defStand(isCorner(k) ? { ads: false } : {}, isCorner(k) ? 1 : NSEC); });
-  return { sv: 4, cam: 'std', n: 40, pitW: 10, pitL: 16, pw: 2, shellrl: 50, st: st, lights: true, adcol: 'white', track: false, pitch: 'football', furn: true, players: false, matchday: false, flagcol: 'red', adart: 'brands', allSeats: false, perim: 'none', ezc: 'blue', ezt: 'white', ezn: true, lstyle: 'lattice', shell: 'none', shellhv: 40, shellk: 'timber', shellsk: 'slats', shellrf: 'solid', shellp: false, shellcol: false, shellcrest: null, shellcrestc: 'auto', shellg: false, shellr: false, shelle: false, shellw: false, shellsl: false, shellgt: false, shellc: 'auto', shells: 'auto', lawn: 'h', lawnw: 'med', shade: 'soft', tod: 'day', sun: 'SW', env: { auto: 'concourse', cells: {} }, cb: {}, name: '', team: '', town: '' };
+  return { sv: 4, yaw: 0, cam: 'std', n: 40, pitW: 10, pitL: 16, pw: 2, shellrl: 50, st: st, lights: true, adcol: 'white', track: false, pitch: 'football', furn: true, players: false, matchday: false, flagcol: 'red', adart: 'brands', allSeats: false, perim: 'none', ezc: 'blue', ezt: 'white', ezn: true, lstyle: 'lattice', shell: 'none', shellhv: 40, shellk: 'timber', shellsk: 'slats', shellrf: 'solid', shellp: false, shellcol: false, shellcrest: null, shellcrestc: 'auto', shellg: false, shellr: false, shelle: false, shellw: false, shellsl: false, shellgt: false, shellc: 'auto', shells: 'auto', lawn: 'h', lawnw: 'med', shade: 'soft', tod: 'day', sun: 'SW', env: { auto: 'concourse', cells: {} }, cb: {}, name: '', team: '', town: '' };
 }
 function setK(m, keys, o) { keys.forEach(function (k) { Object.assign(m.st[k], o); }); }
 function preset(name) {
@@ -5481,10 +5491,11 @@ function genItems(m) {
       const ks = []; for (let k = 2; k < pr.K; k++) { if (pr.tier[k] !== 0 || pr.over[k] || pr.front[k] || (pr.sep && pr.sep[k]) || (pr.bk && k >= pr.bkK)) break; ks.push(k); }   // lowest tier only, and the first two rows by the boards stay plain seats
       const txt = p.stext.replace(/\s+$/, ''), nR = ks.length, W = txt.length * 4 - 1; if (nR < 3 || !txt.length) return null;
       const NRW = nR >= 5 ? 5 : 3;   // a shallow lower tier under an upper tier gets a squashed three-row version of the letters
-      const rpp = Math.max(1, Math.min(Math.floor(nR / NRW), Math.floor(g.len * RPC * 0.94 / W))); if (W * rpp / RPC > g.len) return null;
+      const LT = g.len + e0 + e1, rpp = Math.max(1, Math.min(Math.floor(nR / NRW), Math.floor(LT * RPC * 0.94 / W))); if (W * rpp / RPC > LT) return null;
       const grid = []; for (let ci = 0; ci < txt.length; ci++) { const gl = FONT35[txt[ci]] || FONT35[' ']; for (let cx2 = 0; cx2 < 3; cx2++) { const col = []; for (let ry = 0; ry < 5; ry++) col.push(gl.charAt(ry * 3 + cx2) === '1'); grid.push(col); } if (ci < txt.length - 1) grid.push([false, false, false, false, false]); }
       const ax = o[1] !== 0 ? 0 : 1, sg = (g.row(Math.min(1, g.len - 1), 0)[ax] - g.row(0, 0)[ax]) >= 0 ? 1 : -1, rv = [-o[1], o[0]], pw = rpp / RPC;
-      return { nrw: NRW, k0: ks[0] + Math.round((nR - NRW * rpp) * (p.stpos == null ? 50 : p.stpos) / 100), rpp: rpp, pw: pw, W: grid.length, grid: grid, rho0: (g.len - grid.length * pw) / 2, dir: rv[ax] * sg > 0 ? 1 : -1 };
+      const dr = rv[ax] * sg > 0 ? 1 : -1;
+      return { nrw: NRW, k0: ks[0] + Math.round((nR - NRW * rpp) * (p.stpos == null ? 50 : p.stpos) / 100), rpp: rpp, pw: pw, W: grid.length, grid: grid, rho0: (g.len - grid.length * pw) / 2 + (dr > 0 ? (e1 - e0) / 2 : (e0 - e1) / 2), dir: dr };
     })();
     for (let i = -e0; i < g.len + e1; i++) {
       const si = Math.floor(clampI(i) / g.per), sec = p.secs[si];
@@ -5804,7 +5815,7 @@ function genItems(m) {
             const ze = hz(long ? 0.5 : 1);
             ob.push(slopeBar(o, 0, 1, span - 0.05, span, ze + (p.roof === 'glass' ? 0.115 : 0.05), ze + (p.roof === 'glass' ? 0.115 : 0.05), ze - th, p.roof === 'glass' ? GREY_F : [dk2, mix(dk2, 0.8), mix(dk2, 0.6)]));   // tail fascia
             if (p.roof === 'glass') { if (wLo) ob.push(slopeBar(o, 0, 0.07, 0, span, z0 + 0.04, ze + 0.11, Math.min(z0, ze) - th, GREY_F)); if (wHi) ob.push(slopeBar(o, 0.93, 1, 0, span, z0 + 0.04, ze + 0.11, Math.min(z0, ze) - th, GREY_F)); }
-            if (i % g.per === 0 && !(p.tdis && p.tdis.charAt(i / g.per) === '1')) { const q2 = long ? cr(o, 0, 0.1, span - 0.14, span - 0.04) : cr(o, 0, 0.1, 0.02, 0.18); ob.push(bx(q2[0], q2[1], q2[2], q2[3], 0, (long ? ze : z0 + 0.04) - th, STEEL_L, 1)); }   // column under the overhang
+            if (rp.posts !== false || long) postFracs(i, g.len, g.per, p.rdis, archP).forEach(function (f) { const fc = Math.max(0.05, Math.min(0.95, f)), q2 = long ? cr(o, fc - 0.05, fc + 0.05, span - 0.14, span - 0.04) : cr(o, fc - 0.05, fc + 0.05, 0.02, 0.18); ob.push(bx(q2[0], q2[1], q2[2], q2[3], 0, (long ? ze : z0 + 0.04) - th, STEEL_L, 1)); });   // columns under the overhang, spaced like the other posts
             items.push({ gx: oc[0], gy: oc[1], st: key, sec: si, desc: ob }); cost += 14;
           }
         }
@@ -6107,7 +6118,7 @@ function genItems(m) {
 
 /* ---------- clean up a model from outside (load, import) ---------- */
 function sanitize(o) {
-  const m = newModel(); m.pitW = o && o.pitW ? Math.max(8, Math.min(16, Math.round(+o.pitW / 2) * 2 || 8)) : 8; m.pitL = o && o.pitL ? Math.max(12, Math.min(24, Math.round(+o.pitL / 2) * 2 || 12)) : 12; m.cam = CAMS.some(function (c) { return o && c[0] === o.cam; }) ? o.cam : 'std'; setPitch(m.pitW, m.pitL); m.n = setGrid(o && o.n);   // grounds saved before the pitch could change keep the old 8 x 12
+  const m = newModel(); m.pitW = o && o.pitW ? Math.max(8, Math.min(16, Math.round(+o.pitW / 2) * 2 || 8)) : 8; m.pitL = o && o.pitL ? Math.max(12, Math.min(24, Math.round(+o.pitL / 2) * 2 || 12)) : 12; m.yaw = o && (+o.yaw === 30 || +o.yaw === -30) ? +o.yaw : 0; m.cam = CAMS.some(function (c) { return o && c[0] === o.cam; }) ? o.cam : 'std'; setPitch(m.pitW, m.pitL); m.n = setGrid(o && o.n);   // grounds saved before the pitch could change keep the old 8 x 12
   ['name', 'team', 'town'].forEach(function (k) { m[k] = o && typeof o[k] === 'string' ? o[k].replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40) : ''; });
   if (!o || !o.st) throw new Error('bad');
   const num = function (v, r, d) { v = Math.round(+v); return isFinite(v) ? Math.max(r[0], Math.min(r[1], v)) : d; };
@@ -6315,8 +6326,8 @@ function envBuild(m, items) {
 const tileCache = {};
 function tileSprite(kind, ax, v, pd) {
   pd = pd ? 1 : 0; const key = kind + '|' + ax + '|' + v + '|' + pd; if (tileCache[key]) return tileCache[key];
-  const cv2 = document.createElement('canvas'); cv2.width = TW; cv2.height = TH; const c = cv2.getContext('2d');
-  const P = function (u, w) { return [TW / 2 + (u - w) * TW / 2, (u + w) * TH / 2]; };
+  const cv2 = document.createElement('canvas'); cv2.width = CW; cv2.height = CH; const c = cv2.getContext('2d');
+  const P = function (u, w) { return [SX(u, w) - CX0, SY(u, w)]; };
   const poly = function (pts, col) { c.fillStyle = col; c.beginPath(); pts.forEach(function (p, i) { const q = P(p[0], p[1]); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }); c.closePath(); c.fill(); };
   const line = function (u0, w0, u1, w1, col, wd) { const a = P(u0, w0), b = P(u1, w1); c.strokeStyle = col; c.lineWidth = wd || 1; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); };
   const rnd = (function () { let s = (kind.length * 977 + v * 131 + ax * 17 + pd * 53 + 7) >>> 0; return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
@@ -7332,11 +7343,11 @@ function buildList() {
   }).map(function (it) {
     const v = toView(it.gx, it.gy, S.view);
     let bo = it.boost || 0;
-    if (it.sideN) { const a = toView(it.gx, it.gy, S.view), b = toView(it.gx + it.sideN[0], it.gy + it.sideN[1], S.view), dd = (b[0] - a[0]) + (b[1] - a[1]); bo = dd > 0.15 ? bo : dd < -0.15 ? -0.4 : 0.4; }   // shell blocks and the roof overhang: on the side facing the viewer they draw over the wall and roof beside them; on the far side they sit behind them
-    return { g: it, rx: v[0], ry: v[1], k: v[0] + v[1] + bo, st: it.st, sec: it.sec, desc: it.desc, h: it.desc.reduce(function (m, a) { return Math.max(m, a[5]); }, 0) };
+    if (it.sideN) { const a = toView(it.gx, it.gy, S.view), b = toView(it.gx + it.sideN[0], it.gy + it.sideN[1], S.view), dd = DK(b[0], b[1]) - DK(a[0], a[1]); bo = dd > 0.15 ? bo : dd < -0.15 ? -0.4 : 0.4; }   // shell blocks and the roof overhang: on the side facing the viewer they draw over the wall and roof beside them; on the far side they sit behind them
+    return { g: it, rx: v[0], ry: v[1], k: DK(v[0], v[1]) + bo, st: it.st, sec: it.sec, desc: it.desc, h: it.desc.reduce(function (m, a) { return Math.max(m, a[5]); }, 0) };
   });
   { // a floodlight tower on the far side of the ground stands behind the corner stand next to it: it is drawn before the stand cells around its foot
-    const cv = toView(PX + PW / 2, PY + PL / 2, S.view), ck = cv[0] + cv[1], stK = S.list.filter(function (e) { return e.st; });
+    const cv = toView(PX + PW / 2, PY + PL / 2, S.view), ck = DK(cv[0], cv[1]), stK = S.list.filter(function (e) { return e.st; });
     S.list.forEach(function (e) {
       if (!e.g.pyl || e.k >= ck) return;
       let mn = e.k; stK.forEach(function (o) { if (Math.abs(o.g.gx - e.g.gx) <= 9 && Math.abs(o.g.gy - e.g.gy) <= 9 && o.k < mn + 6) mn = Math.min(mn, o.k); });
@@ -7344,7 +7355,7 @@ function buildList() {
     });
   }
   S.list.sort(function (a, b) { return a.k - b.k; });
-  S.signs = (S.gen.signs || []).map(function (sg) { const v0 = toView(sg.e0[0], sg.e0[1], S.view), v1 = toView(sg.e1[0], sg.e1[1], S.view); return { g: sg, d: Math.max(v0[0] + v0[1], v1[0] + v1[1]) + 0.01 + (sg.boost || 0) }; }).sort(function (a, b) { return a.d - b.d; });
+  S.signs = (S.gen.signs || []).map(function (sg) { const v0 = toView(sg.e0[0], sg.e0[1], S.view), v1 = toView(sg.e1[0], sg.e1[1], S.view); return { g: sg, d: Math.max(DK(v0[0], v0[1]), DK(v1[0], v1[1])) + 0.01 + (sg.boost || 0) }; }).sort(function (a, b) { return a.d - b.d; });
   /* an ad board's artwork waits only until the boards beside it are down (not a flat +2, which let it paint over roofs in front of it) */
   { const slabs = S.signs.filter(function (x) { return !x.g.adface; }); S.signs.forEach(function (x) { if (!x.g.adface) return; let m = x.d; slabs.forEach(function (y) { if (y.d <= x.d + 2 && y.d > m) m = y.d; }); x.d = m + 0.005; }); S.signs.sort(function (a, b) { return a.d - b.d; }); }
   { const top = {}; S.signs.forEach(function (x) { if (!x.g.crest && !x.g.late) top[x.g.key] = Math.max(top[x.g.key] || -1e9, x.d); }); S.signs.forEach(function (x) { if (x.g.crest || x.g.late) { const t2 = Math.max(top[x.g.key] === undefined ? -1e9 : top[x.g.key], top[x.g.key + 'C'] === undefined ? -1e9 : top[x.g.key + 'C']); if (t2 > -1e8 && t2 > x.d) x.d = t2 + 0.005; } }); S.signs.sort(function (a, b) { return a.d - b.d; }); }   // a crest is painted after the name board it overlaps
@@ -7355,12 +7366,12 @@ function buildList() {
 let rafPending = false;
 function redraw() { if (!rafPending) { rafPending = true; requestAnimationFrame(function () { rafPending = false; draw(); }); } }
 function diamondPath(c, rx, ry) {
-  const X = (rx - ry) * TW / 2, Y = (rx + ry) * TH / 2;
-  c.moveTo(X, Y); c.lineTo(X + TW / 2, Y + TH / 2); c.lineTo(X, Y + TH); c.lineTo(X - TW / 2, Y + TH / 2); c.closePath();
+  const X = SX(rx, ry), Y = SY(rx, ry);
+  c.moveTo(X, Y); c.lineTo(X + MA, Y + MC); c.lineTo(X + MA + MB, Y + MC + MD); c.lineTo(X + MB, Y + MD); c.closePath();
 }
 function diamond(rx, ry) {
-  const X = (rx - ry) * TW / 2, Y = (rx + ry) * TH / 2;
-  ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + TW / 2, Y + TH / 2); ctx.lineTo(X, Y + TH); ctx.lineTo(X - TW / 2, Y + TH / 2); ctx.closePath();
+  const X = SX(rx, ry), Y = SY(rx, ry);
+  ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + MA, Y + MC); ctx.lineTo(X + MA + MB, Y + MC + MD); ctx.lineTo(X + MB, Y + MD); ctx.closePath();
 }
 function draw() {
   if (!S.gen) return;
@@ -7377,7 +7388,7 @@ function fromView(rx, ry, v) {
   switch (v) { case 0: return [rx, ry]; case 1: return [ry, N - 1 - rx]; case 2: return [N - 1 - rx, N - 1 - ry]; default: return [N - 1 - ry, rx]; }
 }
 function cellAt(sx, sy) {
-  const X = (sx - S.camX) / S.zoom, Y = (sy - S.camY) / S.zoom, a = X / (TW / 2), b = (Y - TH / 2) / (TH / 2), rx = Math.round((a + b) / 2), ry = Math.round((b - a) / 2);
+  const X = (sx - S.camX) / S.zoom, Y = (sy - S.camY) / S.zoom, dt = MA * MD - MB * MC, rx = Math.floor((MD * X - MB * Y) / dt), ry = Math.floor((MA * Y - MC * X) / dt);
   if (rx < 0 || ry < 0 || rx >= N || ry >= N) return null; return fromView(rx, ry, S.view);
 }
 function isMultiBrush(id) { return id === 'wh2' || !!HOME_FOOT[id]; }
@@ -7452,9 +7463,9 @@ function brushApply(gx, gy) {
 const grassFxC = {};
 function grassFx(v) {
   if (grassFxC[v]) return grassFxC[v];
-  const cv2 = document.createElement('canvas'); cv2.width = TW; cv2.height = TH; const c = cv2.getContext('2d');
+  const cv2 = document.createElement('canvas'); cv2.width = CW; cv2.height = CH; const c = cv2.getContext('2d');
   let s = (v * 2654435761 + 12345) >>> 0; const rnd = function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
-  const P = function (u, w) { return [TW / 2 + (u - w) * TW / 2, (u + w) * TH / 2]; };
+  const P = function (u, w) { return [SX(u, w) - CX0, SY(u, w)]; };
   const dot = function (u, w, col, a, h) { const p = P(u, w); c.globalAlpha = a; c.fillStyle = col; c.fillRect(Math.round(p[0]), Math.round(p[1]) - (h || 0), 1, (h || 0) + 1); c.globalAlpha = 1; };
   for (let i = 0; i < 70; i++) dot(0.04 + rnd() * 0.92, 0.04 + rnd() * 0.92, rnd() < 0.5 ? '#173d1a' : '#b6dc84', 0.12 + rnd() * 0.18);
   for (let i = 0; i < 8; i++) dot(0.08 + rnd() * 0.84, 0.08 + rnd() * 0.84, rnd() < 0.5 ? '#2d6a2a' : '#9fcf6c', 0.5, 1 + (rnd() < 0.4 ? 1 : 0));   // blades
@@ -7477,8 +7488,8 @@ function crestCanvas(cr) {
 function drawSign(c, sg) {
   if (sg.g.adface) { drawAdFace(c, sg.g); return; }
   const g = sg.g, q0 = toView(g.gx, g.gy, S.view), q1 = toView(g.gx + g.o[0], g.gy + g.o[1], S.view);
-  if ((q1[0] + q1[1]) - (q0[0] + q0[1]) <= 0) return;   // only when the outward side points towards the camera
-  const P = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [(vx - vy) * TW / 2, (vx + vy) * TH / 2]; };
+  if (DK(q1[0], q1[1]) - DK(q0[0], q0[1]) <= 0) return;   // only when the outward side points towards the camera
+  const P = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [SX(vx, vy), SY(vx, vy)]; };
   let a = P(g.a), b = P(g.b); if (b[0] < a[0]) { const t = a; a = b; b = t; }
   const L = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1]), ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, CP = 36, W = L * CP, Hh = (g.z1 - g.z0) * BH;
   c.save(); c.transform(ux / CP, uy / CP, 0, 1, a[0], a[1] - g.z1 * BH);
@@ -7486,7 +7497,7 @@ function drawSign(c, sg) {
     if (g.flat) { const cvf = crestCanvas(g.crest), smf = c.imageSmoothingEnabled; c.imageSmoothingEnabled = false; c.drawImage(cvf, 0, 0, W, Hh); c.imageSmoothingEnabled = smf; c.restore(); return; }   // applied flat to the face: no plaque, no thickness
     c.restore();
     const cvs = crestCanvas(g.crest), M = function (x, y) { return [a[0] + ux / CP * x, a[1] - g.z1 * BH + uy / CP * x + y]; }, PADX = 2.4, T = 0.17;
-    const dv = [q1[0] - q0[0], q1[1] - q0[1]], ns = [(dv[0] - dv[1]) * TW / 2 * T, (dv[0] + dv[1]) * TH / 2 * T];
+    const dv = [q1[0] - q0[0], q1[1] - q0[1]], ns = [SX(dv[0], dv[1]) * T, SY(dv[0], dv[1]) * T];
     const face = g.bg || '#14181d', edge = shadeHex(face, 0.58);
     const quad = function (pts, col) { c.fillStyle = col; c.beginPath(); pts.forEach(function (p, i) { i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); }); c.closePath(); c.fill(); };
     if (g.round) {   // a round plaque: a true ellipse in the wall's plane, so the edge is smooth at any zoom
@@ -7513,7 +7524,7 @@ function drawSign(c, sg) {
     const txt = g.text.toUpperCase(), F = '900 ' + (Hh * 0.8) + 'px "Inter", ui-sans-serif, sans-serif';
     c.font = F; let fs = Hh * 0.8; const mw = c.measureText(txt).width, avail = W - 14; if (mw > avail) { fs *= avail / mw; c.font = '900 ' + fs + 'px "Inter", ui-sans-serif, sans-serif'; }
     c.textAlign = 'left'; c.textBaseline = 'middle'; const tw = c.measureText(txt).width, tx = g.align === 'C' ? Math.max(8, (W - tw) / 2) : g.align === 'R' ? Math.max(8, W - tw - 10) : 8, ty = Hh * 0.48, dp = Math.max(3, Math.round(Hh * 0.075));
-    const nvx = q1[0] - q0[0], nvy = q1[1] - q0[1], nsx = (nvx - nvy) * TW / 2, nsy = (nvx + nvy) * TH / 2, nl = Math.hypot(nsx, nsy) || 1, exs = nsx / nl, eys = nsy / nl, kx = CP / (ux || 1);   // screen direction of the wall's outward normal, converted into the sign's own sheared space
+    const nvx = q1[0] - q0[0], nvy = q1[1] - q0[1], nsx = SX(nvx, nvy), nsy = SY(nvx, nvy), nl = Math.hypot(nsx, nsy) || 1, exs = nsx / nl, eys = nsy / nl, kx = CP / (ux || 1);   // screen direction of the wall's outward normal, converted into the sign's own sheared space
     const off = function (i) { const ox = -exs * i * kx; return [ox, -eys * i - ox * uy / CP]; };   // the letter body runs back into the wall, away from the lit face
     c.save(); c.lineJoin = 'round';
     { const o2 = off(dp + 1); c.strokeStyle = 'rgba(20,24,30,0.7)'; c.lineWidth = Math.max(2, Hh * 0.09 + 2); c.strokeText(txt, tx + o2[0], ty + o2[1]); }
@@ -7639,8 +7650,8 @@ function adCanvas(bi, wc) {
 }
 function drawAdFace(c, g) {   // one flat slice of a board's face, text reading left to right as seen from the pitch
   const n0 = toView(g.gx, g.gy, S.view), n1 = toView(g.gx + g.n[0] * 0.5, g.gy + g.n[1] * 0.5, S.view);
-  if ((n1[0] + n1[1]) - (n0[0] + n0[1]) <= 0) return;   // the face looks away from the camera
-  const P = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [(vx - vy) * TW / 2, (vx + vy) * TH / 2]; };
+  if (DK(n1[0], n1[1]) - DK(n0[0], n0[1]) <= 0) return;   // the face looks away from the camera
+  const P = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [SX(vx, vy), SY(vx, vy)]; };
   let a = P(g.a), b = P(g.b); const e0 = P(g.A0), e1 = P(g.A1), rev = e1[0] < e0[0];
   let u0 = g.t0, u1 = g.t1; if (rev) { u0 = 1 - g.t1; u1 = 1 - g.t0; }
   if (b[0] < a[0]) { const t = a; a = b; b = t; }
@@ -7685,7 +7696,7 @@ function drawScene(c, o) {
   });
   c.beginPath(); for (let ry = 0; ry < N; ry++) for (let rx = 0; rx < N; rx++) diamondPath(c, rx, ry); c.stroke();
     {   // the soil edge of the plot on its two near sides: a turf lip over bands of topsoil, subsoil and clay, flecked with pebbles
-      const hw = N * TW / 2, hh = N * TH / 2, D = 46, L = [-hw, hh], B = [0, N * TH], R = [hw, hh];
+      const hw = N * CW / 2, hh = N * CH / 2, D = 46, L = [N * MB, N * MD], B = [N * (MA + MB), N * (MC + MD)], R = [N * MA, N * MC];
       const lum = function (h) { return (parseInt(h.substr(1, 2), 16) * 0.3 + parseInt(h.substr(3, 2), 16) * 0.59 + parseInt(h.substr(5, 2), 16) * 0.11) / 255; };
       const lf = Math.max(0.42, Math.min(1, lum(ga) / 0.55));   // dark mode: the earth darkens with the grass
       const BANDS = [[0, 4.5, ga, 0.78], [4.5, 18, '#6e4f33', 1], [18, 31, '#a07a4c', 1], [31, D, '#74695a', 1]];   // [from, to, colour, shade] top to bottom
@@ -7718,8 +7729,8 @@ function drawScene(c, o) {
     const tk = (S.env && S.env._tk) || S._tk0 || {};
     for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
       if (tk[gx + ',' + gy] || (gx >= PX - 1 && gx < PX + PW + 1 && gy >= PY - 1 && gy < PY + PL + 1)) continue;
-      const vv = toView(gx, gy, S.view), cxs = (vv[0] - vv[1]) * TW / 2, cys = (vv[0] + vv[1]) * TH / 2;
-      if (cxs + TW / 2 < cx0 || cxs - TW / 2 > cx1 || cys + TH < cy0 || cys > cy1) continue;   // only the cells on screen
+      const vv = toView(gx, gy, S.view), cxs = SX(vv[0], vv[1]), cys = SY(vv[0], vv[1]);
+      if (cxs + CX1 < cx0 || cxs + CX0 > cx1 || cys + CH < cy0 || cys > cy1) continue;   // only the cells on screen
       /* grass speckle removed */
     }
     const KB = { paving: 1, brick: 1, plaza: 1, tarmac: 1, bays: 1, path: 2 };   // kerbs where hard ground meets the grass
@@ -7740,7 +7751,7 @@ function drawScene(c, o) {
       const tk = (S.env && S.env._tk) || {}; ax = 0;
       [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) { const nt = tk[(t.gx + d[0]) + ',' + (t.gy + d[1])]; if (!nt || nt.t !== t.t) return; const w = toView(t.gx + d[0], t.gy + d[1], S.view); ax |= w[0] > v[0] ? 1 : w[0] < v[0] ? 2 : w[1] > v[1] ? 4 : 8; });
     }
-    c.drawImage(tileSprite(t.t, ax, t.v, t.pd), (v[0] - v[1]) * TW / 2 - TW / 2, (v[0] + v[1]) * TH / 2);
+    c.drawImage(tileSprite(t.t, ax, t.v, t.pd), SX(v[0], v[1]) + CX0, SY(v[0], v[1]));
   });
   if (REAL && S.env) {   // street life: the odd pedestrian on the paving, a couple walking together now and then
     const SH = ['#c0392b', '#2c5aa0', '#e8e8e4', '#222428', '#d9a21b', '#3f7f4a', '#7a4a8a', '#e07a2d', '#5aa0b0'], HR = ['#2a1d14', '#5a3a22', '#b58a4a', '#8a8a8a', '#1a1a1a', '#7a4a2a'], SK = ['#e8c4a0', '#d9a77a', '#b9805a', '#8a5a3a', '#f0d2b4'];
@@ -7749,9 +7760,9 @@ function drawScene(c, o) {
       if (t.t !== 'paving' && t.t !== 'plaza' && t.t !== 'brick' && t.t !== 'path') return;
       if (S.env.occ && S.env.occ[t.gx + ',' + t.gy]) return;
       if (hh(t.gx, t.gy, 1) > 0.075) return;
-      const v = toView(t.gx, t.gy, S.view), cx = (v[0] - v[1]) * TW / 2, cy = (v[0] + v[1]) * TH / 2 + TH / 2, n = hh(t.gx, t.gy, 2) < 0.3 ? 2 : 1;
+      const v = toView(t.gx, t.gy, S.view), cx = SX(v[0], v[1]) + (MA + MB) / 2, cy = SY(v[0], v[1]) + CH / 2, n = hh(t.gx, t.gy, 2) < 0.3 ? 2 : 1;
       for (let i = 0; i < n; i++) {
-        const ox = (hh(t.gx, t.gy, 3 + i) - 0.5) * TW * 0.34, oy = (hh(t.gx, t.gy, 6 + i) - 0.5) * TH * 0.3, px = cx + ox, py = cy + oy + 3;
+        const ox = (hh(t.gx, t.gy, 3 + i) - 0.5) * CW * 0.34, oy = (hh(t.gx, t.gy, 6 + i) - 0.5) * CH * 0.3, px = cx + ox, py = cy + oy + 3;
         c.fillStyle = 'rgba(10,20,16,0.28)'; c.beginPath(); c.ellipse(px + 0.6, py + 1.2, 2.4, 1.1, 0, 0, 6.3); c.fill();   // a small shadow on the ground
         const sh = SH[Math.floor(hh(t.gx, t.gy, 9 + i) * SH.length)];
         drawPerson(c, px, py - 1.2, { s: sh, k: SK[Math.floor(hh(t.gx, t.gy, 12 + i) * SK.length)], h: HR[Math.floor(hh(t.gx, t.gy, 15 + i) * HR.length)], a: 0 });
@@ -7761,7 +7772,7 @@ function drawScene(c, o) {
   {
     const kerbs = S._kerbs || [];
     if (kerbs.length) {
-      const pw = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [(vx - vy) * TW / 2, (vx + vy) * TH / 2]; };
+      const pw = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [SX(vx, vy), SY(vx, vy)]; };
       [[1.6, 'rgba(10,26,12,0.32)', 1], [1.3, '#b9bcb8', 0], [0.5, 'rgba(255,255,255,0.45)', -1]].forEach(function (st) {
         c.lineWidth = st[0]; c.strokeStyle = st[1]; c.beginPath();
         kerbs.forEach(function (k) {
@@ -7778,19 +7789,19 @@ function drawScene(c, o) {
   c.setTransform(k, 0, 0, k, o.dpr * o.camX, o.dpr * o.camY);
   if (o.sync) groundLayer(c, o);
   else {   // on screen the ground (grass, tiles, kerbs) is painted once per view and blitted
-    const gs = Math.min(2, 4096 / (N * TW)), Wc = Math.ceil(N * TW * gs), Hc = Math.ceil((N * TH + 2 * TH + 18) * gs), key = S.view + '|' + N + '|' + tok('--ground-a') + tok('--ground-b') + tok('--grid');
+    const gs = Math.min(2, 4096 / (N * CW)), Wc = Math.ceil(N * CW * gs), Hc = Math.ceil((N * CH + 2 * CH + 18) * gs), key = S.view + '|' + YAW + '|' + N + '|' + tok('--ground-a') + tok('--ground-b') + tok('--grid');
     if (!GL.cv || GL.key !== key || GL.env !== S.env || GL.w !== Wc || GL.h !== Hc) {
       if (!GL.cv) GL.cv = document.createElement('canvas'); GL.cv.width = Wc; GL.cv.height = Hc; GL.key = key; GL.env = S.env; GL.w = Wc; GL.h = Hc;
       const gc = GL.cv.getContext('2d'); gc.setTransform(1, 0, 0, 1, 0, 0); gc.clearRect(0, 0, Wc, Hc);
-      groundLayer(gc, { dpr: 1, zoom: gs, camX: N * TW / 2 * gs, camY: TH * gs, w: Wc, h: Hc, sync: true, ground: true });
+      groundLayer(gc, { dpr: 1, zoom: gs, camX: -N * MB * gs, camY: CH * gs, w: Wc, h: Hc, sync: true, ground: true });
     }
     c.setTransform(k, 0, 0, k, o.dpr * o.camX, o.dpr * o.camY);
-    c.imageSmoothingEnabled = o.zoom < gs; c.drawImage(GL.cv, -N * TW / 2, -TH, Wc / gs, Hc / gs);
+    c.imageSmoothingEnabled = o.zoom < gs; c.drawImage(GL.cv, N * MB, -CH, Wc / gs, Hc / gs);
   }
   drawPitch(c, S.view, o.zoom, S.m);
   const GX3 = REAL === 3 && GXR.ready();   // the '3D' look lights and shadows everything itself
   if (!GX3 && S.gen && S.gen.shadows && S.gen.shadows.length) {   // roofs' cast shadows on the pitch and the ground around the stands
-    const pt = function (w) { const v = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = v[0] + 0.5, vy = v[1] + 0.5; return [(vx - vy) * TW / 2, (vx + vy) * TH / 2]; };
+    const pt = function (w) { const v = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = v[0] + 0.5, vy = v[1] + 0.5; return [SX(vx, vy), SY(vx, vy)]; };
     const A = S.m.shade === 'strong' ? 0.62 : 0.44;
     [1, 2, 3].forEach(function (lv) {   // three stacked passes: the penumbra is painted once, the full shadow three times
       c.beginPath();
@@ -7799,7 +7810,7 @@ function drawScene(c, o) {
     });
   }
   if (!GX3 && S.objSh && S.objSh.length) {   // shadows of pylons, buildings and trees
-    const pt2 = function (w) { const v = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = v[0] + 0.5, vy = v[1] + 0.5; return [(vx - vy) * TW / 2, (vx + vy) * TH / 2]; };
+    const pt2 = function (w) { const v = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = v[0] + 0.5, vy = v[1] + 0.5; return [SX(vx, vy), SY(vx, vy)]; };
     c.beginPath();
     S.objSh.forEach(function (poly) { poly.forEach(function (w, i) { const p = pt2(w); if (i) c.lineTo(p[0], p[1]); else c.moveTo(p[0], p[1]); }); c.closePath(); });
     if (REAL) c.filter = 'blur(' + (1.2 * o.dpr * o.zoom) + 'px)'; c.fillStyle = 'rgba(10,28,24,' + (S.m.shade === 'strong' ? 0.42 : 0.3) + ')'; c.fill(); c.filter = 'none';
@@ -7811,8 +7822,8 @@ function drawScene(c, o) {
   for (let i = 0; i < (GX3 ? 0 : S.list.length); i++) {
     const it = S.list[i], yo = Math.ceil(Math.max(it.h, 0.1) * BH) + 3;
     while (sgi < sgs.length && sgs[sgi].d <= it.rx + it.ry) drawSign(c, sgs[sgi++]);
-    const x = (it.rx - it.ry) * TW / 2 - TW / 2, y = (it.rx + it.ry) * TH / 2 - yo;
-    if (x > vx1 || x + TW < vx0 || y > vy1 || y + yo + TH < vy0) continue;
+    const x = SX(it.rx, it.ry) + CX0, y = SY(it.rx, it.ry) - yo;
+    if (x > vx1 || x + CW < vx0 || y > vy1 || y + yo + CH < vy0) continue;
     const key = itemKey(it); let s = spriteGet(key, S.view);
     if (!s) { if (o.sync) s = spriteMake(it.desc, key, S.view); else { pending++; continue; } }
     const yAdj = s.yoff - yo; c.drawImage(s, x - (s.xoff || 0), y - yAdj);
@@ -7883,7 +7894,7 @@ function envLamps() {   // lamp posts and floodlight masts placed in the surroun
   });
   (typeof SHELL_LEDS !== 'undefined' ? SHELL_LEDS : []).forEach(function (p) {   // the LED poles shine after dark: a tight bloom up the pole and a wash of coloured light on the ground
     const rgb = parse(p.c).slice(0, 3).join(',');
-    { const a = toView(p.x - 0.5, p.y - 0.5, S.view), b = toView(PX + PW / 2 - 0.5, PY + PL / 2 - 0.5, S.view); if (a[0] + a[1] < b[0] + b[1] - 1) return; }   // hidden behind the roof or a stand from here: no glow floating in mid-air
+    { const a = toView(p.x - 0.5, p.y - 0.5, S.view), b = toView(PX + PW / 2 - 0.5, PY + PL / 2 - 0.5, S.view); if (DK(a[0], a[1]) < DK(b[0], b[1]) - 1) return; }   // hidden behind the roof or a stand from here: no glow floating in mid-air
     out.push({ x: p.x, y: p.y, z: p.T * 0.5, n: 4, env: true, pr: 34, led: true, rgb: rgb });
     [0.2, 0.4, 0.6, 0.8, 0.96].forEach(function (f) { out.push({ x: p.x, y: p.y, z: p.T * f, n: 2, pt: true, led: true, rgb: rgb }); });
   }); return out;
@@ -7896,21 +7907,21 @@ function lampGlow(c, o, night) {
   L.forEach(function (l) {   // a wide pool of light
     if (l.pt) return;   // a wide pool of light on the ground (and seating) below and in front of each lamp
     const dx = pcx - l.x, dy = pcy - l.y, dd = Math.hypot(dx, dy) || 1, mv = l.env ? 0 : Math.min(4.5, dd * 0.35), px = l.x + dx / dd * mv, py = l.y + dy / dd * mv;
-    const q = toView(px - 0.5, py - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5, x = (vx - vy) * TW / 2, y = (vx + vy) * TH / 2 - (l.env ? 0.1 : 0.4) * BH, r = l.env ? l.pr : 46 + Math.min(40, l.n * 2.5), A = (night ? (l.env ? 0.3 : 0.1) : (l.env ? 0.12 : 0.045)) * Math.min(1, 0.4 + l.n / 8);
+    const q = toView(px - 0.5, py - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5, x = SX(vx, vy), y = SY(vx, vy) - (l.env ? 0.1 : 0.4) * BH, r = l.env ? l.pr : 46 + Math.min(40, l.n * 2.5), A = (night ? (l.env ? 0.3 : 0.1) : (l.env ? 0.12 : 0.045)) * Math.min(1, 0.4 + l.n / 8);
     const g = c.createRadialGradient(0, 0, 0, 0, 0, r), col = l.rgb || (l.warm ? '255,232,160' : '235,245,255');
     g.addColorStop(0, 'rgba(' + col + ',' + A + ')'); g.addColorStop(1, 'rgba(' + col + ',0)');
     c.save(); c.translate(x, y); c.scale(1, 0.5); c.fillStyle = g; c.fillRect(-r, -r, r * 2, r * 2); c.restore();
   });
   L.forEach(function (l) {
     if (l.pool || l.poolOnly) return;
-    const q = toView(l.x - 0.5, l.y - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5, x = (vx - vy) * TW / 2, y = (vx + vy) * TH / 2 - l.z * BH, r = l.pt ? 3.5 + Math.min(5, l.n * 0.8) : 10 + Math.min(34, l.n * 1.6), A = l.pt ? (night ? 0.95 : 0.5) : (night ? 0.8 : 0.4) * Math.min(1, 0.35 + l.n / 8);
+    const q = toView(l.x - 0.5, l.y - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5, x = SX(vx, vy), y = SY(vx, vy) - l.z * BH, r = l.pt ? 3.5 + Math.min(5, l.n * 0.8) : 10 + Math.min(34, l.n * 1.6), A = l.pt ? (night ? 0.95 : 0.5) : (night ? 0.8 : 0.4) * Math.min(1, 0.35 + l.n / 8);
     const g = c.createRadialGradient(x, y, 0, x, y, r), col = l.rgb || (l.warm ? '255,236,170' : '255,250,235');
     g.addColorStop(0, 'rgba(' + col + ',' + A + ')'); g.addColorStop(0.35, 'rgba(' + col + ',' + A * 0.35 + ')'); g.addColorStop(1, 'rgba(' + col + ',0)');
     c.fillStyle = g; c.fillRect(x - r, y - r, r * 2, r * 2);
   });
   const st = S.gen && S.gen.shadows && S.gen.shadows.strip;
   if (st && st.length > 1) {   // a continuous light strip under the inner roof edge: a bright core, a tight bloom and a wide soft spill
-    const sp = st.map(function (r) { const q = toView(r[0] - 0.5, r[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5, a = toView(10, 10, S.view), b = toView(10 + r[3], 10 + r[4], S.view); return [(vx - vy) * TW / 2, (vx + vy) * TH / 2 - r[2] * BH, (b[0] + b[1]) - (a[0] + a[1]) > 0, !lampCovered(r[0] + r[3] * 0.15, r[1] + r[4] * 0.15, r[2])]; });   // last flag: not hidden behind the roof itself
+    const sp = st.map(function (r) { const q = toView(r[0] - 0.5, r[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5, a = toView(10, 10, S.view), b = toView(10 + r[3], 10 + r[4], S.view); return [SX(vx, vy), SY(vx, vy) - r[2] * BH, DK(b[0], b[1]) - DK(a[0], a[1]) > 0, !lampCovered(r[0] + r[3] * 0.15, r[1] + r[4] * 0.15, r[2])]; });   // last flag: not hidden behind the roof itself
     c.lineCap = 'butt'; c.lineJoin = 'round';
     const runs = function (onlyVis) {   // consecutive points as polylines, split where the strip turns away from the camera
       const out = []; let cur = null;
@@ -7933,8 +7944,8 @@ function nightPass(c, o, sgs) {
   const gx0 = W / 2 + sdx * W * 0.6, gy0 = H / 2 + sdy * H * 0.7, gx1 = W / 2 - sdx * W * 0.6, gy1 = H / 2 - sdy * H * 0.7, wg = n.createLinearGradient(gx0, gy0, gx1, gy1);
   if (S.m.tod === 'dawn') { wg.addColorStop(0, 'rgba(255,196,150,0.2)'); wg.addColorStop(0.5, 'rgba(214,170,200,0.2)'); wg.addColorStop(1, 'rgba(96,110,176,0.28)'); } else if (night) { wg.addColorStop(0, 'rgba(18,30,78,0.56)'); wg.addColorStop(1, 'rgba(6,12,38,0.74)'); } else { wg.addColorStop(0, 'rgba(255,140,60,0.26)'); wg.addColorStop(0.5, 'rgba(150,70,110,0.28)'); wg.addColorStop(1, 'rgba(34,26,84,0.4)'); }
   n.fillStyle = wg; n.fillRect(0, 0, W, H);
-  const P = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [((vx - vy) * TW / 2) * k + o.dpr * o.camX, ((vx + vy) * TH / 2) * k + o.dpr * o.camY]; };
-  const pc = P([PX + PW / 2, PY + PL / 2]), R = (PW + PL) * TW * 0.5 * k * 0.95;
+  const P = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [(SX(vx, vy)) * k + o.dpr * o.camX, (SY(vx, vy)) * k + o.dpr * o.camY]; };
+  const pc = P([PX + PW / 2, PY + PL / 2]), R = (PW + PL) * CW * 0.5 * k * 0.95;
   n.save(); n.globalCompositeOperation = 'destination-out'; n.translate(pc[0], pc[1]); n.scale(1, 0.5);
   const gr = n.createRadialGradient(0, 0, R * 0.25, 0, 0, R * 1.25); gr.addColorStop(0, 'rgba(0,0,0,' + (night ? 0.88 : 0.9) + ')'); gr.addColorStop(0.55, 'rgba(0,0,0,' + (night ? 0.7 : 0.8) + ')'); gr.addColorStop(1, 'rgba(0,0,0,0)');
   n.fillStyle = gr; n.fillRect(-R * 1.3, -R * 1.3 * 2, R * 2.6, R * 5.2); n.restore();
@@ -7942,10 +7953,10 @@ function nightPass(c, o, sgs) {
   lampGlow(c, o, night);
   if (!night) return;
   c.save(); c.setTransform(k, 0, 0, k, o.dpr * o.camX, o.dpr * o.camY); c.globalCompositeOperation = 'lighter';
-  const Ps = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [(vx - vy) * TW / 2, (vx + vy) * TH / 2]; };
+  const Ps = function (w) { const q = toView(w[0] - 0.5, w[1] - 0.5, S.view), vx = q[0] + 0.5, vy = q[1] + 0.5; return [SX(vx, vy), SY(vx, vy)]; };
   sgs.forEach(function (sg) {
     const g = sg.g; if (!(g.cushion || g.albayt || g.facet || g.glowname) || !g.col && !g.tcol) return;
-    const q0 = toView(g.gx, g.gy, S.view), q1 = toView(g.gx + g.o[0], g.gy + g.o[1], S.view); if ((q1[0] + q1[1]) - (q0[0] + q0[1]) <= 0) return;
+    const q0 = toView(g.gx, g.gy, S.view), q1 = toView(g.gx + g.o[0], g.gy + g.o[1], S.view); if (DK(q1[0], q1[1]) - DK(q0[0], q0[1]) <= 0) return;
     const col = g.col || g.tcol, A = Ps(g.a), B = Ps(g.b), E = g.o, d = 1.5;
     const A2 = Ps([g.a[0] + E[0] * d, g.a[1] + E[1] * d]), B2 = Ps([g.b[0] + E[0] * d, g.b[1] + E[1] * d]);
     const lg = c.createLinearGradient((A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A2[0] + B2[0]) / 2, (A2[1] + B2[1]) / 2), rgb = parse(col);
@@ -7962,8 +7973,8 @@ function renderPNG(opt) {
   if (S.dirty) buildList();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   S.list.forEach(function (it) {
-    const wx = (it.rx - it.ry) * TW / 2, wy = (it.rx + it.ry) * TH / 2;
-    x0 = Math.min(x0, wx - TW / 2); x1 = Math.max(x1, wx + TW / 2); y0 = Math.min(y0, wy - it.h * BH - 6); y1 = Math.max(y1, wy + TH);
+    const wx = SX(it.rx, it.ry), wy = SY(it.rx, it.ry);
+    x0 = Math.min(x0, wx + CX0); x1 = Math.max(x1, wx + CX1); y0 = Math.min(y0, wy - it.h * BH - 6); y1 = Math.max(y1, wy + CH);
   });
   if (x0 === Infinity) return Promise.reject(new Error('empty'));
   const pad = 40; x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
@@ -7991,8 +8002,8 @@ function itemKey(it) { const g = it.g; return g.key || (g.key = descKey(g.desc))
 /* when drawing has settled, quietly build the other three views in small slices so rotating is instant */
 let fillActive = false;
 function onScreen(it) {
-  const yo = Math.ceil(Math.max(it.h, 0.1) * BH) + 3, x = (it.rx - it.ry) * TW / 2 - TW / 2, y = (it.rx + it.ry) * TH / 2 - yo;
-  return !(x > (S.w - S.camX) / S.zoom || x + TW < -S.camX / S.zoom || y > (S.h - S.camY) / S.zoom || y + yo + TH < -S.camY / S.zoom);
+  const yo = Math.ceil(Math.max(it.h, 0.1) * BH) + 3, x = SX(it.rx, it.ry) + CX0, y = SY(it.rx, it.ry) - yo;
+  return !(x > (S.w - S.camX) / S.zoom || x + CW < -S.camX / S.zoom || y > (S.h - S.camY) / S.zoom || y + yo + CH < -S.camY / S.zoom);
 }
 /* builds the missing sprites for what is on screen in ~12 ms slices (so the page stays responsive), repainting a few times a second */
 function fillRun() {
@@ -8038,10 +8049,10 @@ function fit() {
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   S.list.forEach(function (it) {
     if (!it.st) return;   // floodlights stay out of the fit
-    const wx = (it.rx - it.ry) * TW / 2, wy = (it.rx + it.ry) * TH / 2;
-    x0 = Math.min(x0, wx - TW / 2); x1 = Math.max(x1, wx + TW / 2); y0 = Math.min(y0, wy - it.h * BH); y1 = Math.max(y1, wy + TH);
+    const wx = SX(it.rx, it.ry), wy = SY(it.rx, it.ry);
+    x0 = Math.min(x0, wx + CX0); x1 = Math.max(x1, wx + CX1); y0 = Math.min(y0, wy - it.h * BH); y1 = Math.max(y1, wy + CH);
   });
-  if (S.envMode) { x0 = -N * TW / 2; x1 = N * TW / 2; y0 = -TH; y1 = N * TH + TH; }   // while editing the surroundings Fit shows the whole ground
+  if (S.envMode) { x0 = N * MB; x1 = N * MA; y0 = -CH; y1 = N * CH + CH; }   // while editing the surroundings Fit shows the whole ground
   if (x0 === Infinity) { x0 = -TW * 4; x1 = TW * 4; y0 = N * TH / 2 - TH * 4; y1 = N * TH / 2 + TH * 4; }
   const bw = x1 - x0, bh = y1 - y0;
   if (S.cams) delete S.cams[S.view];
@@ -8063,7 +8074,7 @@ function pickItem(sx, sy) {
   for (let i = S.list.length - 1; i >= 0; i--) {
     const it = S.list[i];
     const sp = spriteGet(itemKey(it), S.view); if (!sp) continue;
-    const px = Math.floor(u - ((it.rx - it.ry) * TW / 2 - TW / 2) + (sp.xoff || 0)), py = Math.floor(v - ((it.rx + it.ry) * TH / 2 - sp.yoff));
+    const px = Math.floor(u - (SX(it.rx, it.ry) + CX0) + (sp.xoff || 0)), py = Math.floor(v - (SY(it.rx, it.ry) - sp.yoff));
     if (px < 0 || py < 0 || px >= sp.width || py >= sp.height) continue;
     const a = sp.getContext('2d').getImageData(px, py, 1, 1).data[3];
     if (a > 40) return it.st ? it : null;
@@ -9220,6 +9231,11 @@ function renderEnv() {
     const b = mk('button', 'btn sm', x[0]); if (i === 1) { b.setAttribute('aria-pressed', 'true'); b.style.cursor = 'default'; b.setAttribute('aria-label', 'Current ground size'); }
     else { b.disabled = x[1] < 30 || x[1] > 60; b.addEventListener('click', function () { resizeGround(x[1]); }); }
     gb.appendChild(b);
+  });
+  const ys = $('yawSeg'); ys.innerHTML = '';
+  YAWS.forEach(function (x) {
+    const b = mk('button', 'btn sm', x[1]); b.setAttribute('aria-pressed', (S.m.yaw || 0) === x[0] ? 'true' : 'false');
+    b.addEventListener('click', function () { if ((S.m.yaw || 0) === x[0]) return; edit(function (m) { m.yaw = x[0]; }); fit(); }); ys.appendChild(b);
   });
   const cs = $('camSeg'); cs.innerHTML = '';
   CAMS.forEach(function (x) {
